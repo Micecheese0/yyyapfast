@@ -60,7 +60,7 @@ export component FavoriteStar inherits Rectangle {
     }
 }
 
-// The GIF picker, as Discord's: a search over Tenor, a home of the
+// The GIF picker, as Discord's: a search over Tenor or Klipy, a home of the
 // Favorites tile, "Trending GIFs" and the trending terms, and the GIFs
 // found, in columns. A click sends a GIF; Shift and a click puts it in the
 // message. The star keeps it among the favourites.
@@ -136,7 +136,7 @@ export component GifPicker inherits VerticalLayout {
             field := TextField {
                 max-width: root.view == 1 ? 0px : 100000px; visible: root.view != 1;
                 min-height: 34px; text-size: 15px; pad: 10px; fill: Theme.sunken;
-                placeholder: root.view == 2 ? "Search Favorites" : "Search Tenor";
+                placeholder: root.view == 2 ? "Search Favorites" : "Search GIFs";
                 label: self.placeholder;
                 text <=> root.query;
                 edited(text) => {
