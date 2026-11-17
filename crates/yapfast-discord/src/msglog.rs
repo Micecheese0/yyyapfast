@@ -774,6 +774,26 @@ pub fn local_media(message: &Message, index: usize) -> Option<PathBuf> {
     file.is_file().then_some(file)
 }
 
+/// [`local_media`]'s file as an address, which the timeline shows a deleted
+/// message's attachment from, and opens it by.
+pub fn local_url(message: &Message, index: usize) -> Option<String> {
+    url::Url::from_file_path(local_media(message, index)?)
+        .ok()
+        .map(Into::into)
+}
+
+/// The file in the log's folder that `address`, a [`local_url`], names. No
+/// other file is named: an address from anywhere else, or one that leaves the
+/// folder, gives none.
+pub fn local_path(address: &str) -> Option<PathBuf> {
+    let path = url::Url::parse(address).ok()?.to_file_path().ok()?;
+    let inside = path.starts_with(root()?)
+        && !path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir));
+    inside.then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -862,6 +882,16 @@ mod tests {
         append("9", &[line("c", &said("3", "three", false))]);
         let after: Vec<_> = super::logged("9").iter().map(|m| m.id.clone()).collect();
         assert_eq!(after, ["1", "2"]);
+        // The address of a saved file names that file, and only files here.
+        std::fs::create_dir_all(root.join("media")).unwrap();
+        let file = root.join("media").join("a b#c.png");
+        std::fs::write(&file, b"x").unwrap();
+        let address = url::Url::from_file_path(&file).unwrap().to_string();
+        assert_eq!(local_path(&address), Some(file));
+        let outside = std::env::temp_dir().join("msglog-outside.png");
+        let address = url::Url::from_file_path(&outside).unwrap().to_string();
+        assert_eq!(local_path(&address), None);
+        assert_eq!(local_path("https://cdn.discordapp.com/a.png"), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

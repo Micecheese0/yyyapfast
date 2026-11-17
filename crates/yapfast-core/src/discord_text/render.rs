@@ -320,6 +320,20 @@ pub(super) async fn with_previews(
 
 /// A picture downloaded and decoded at the timeline's preview size.
 pub(super) async fn preview(discord: &Discord, url: &str) -> Option<Arc<Picture>> {
+    // A deleted message's picture the message log saved, decoded where it is.
+    if let Some(file) = yapfast_discord::msglog::local_path(url) {
+        return tokio::task::spawn_blocking(move || {
+            crate::chat::decode_picture_at(
+                &file,
+                crate::chat::PREVIEW_WIDTH,
+                crate::chat::PREVIEW_HEIGHT,
+            )
+        })
+        .await
+        .ok()
+        .flatten()
+        .map(Arc::new);
+    }
     let data = discord
         .download(url, MAX_PREVIEW_DOWNLOAD_BYTES)
         .await

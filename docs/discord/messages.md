@@ -1026,6 +1026,15 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   deleted messages and edited messages' earlier versions that fall among the
   loaded ones, so an old deleted message shows when you scroll to where it
   was.
+- A deleted message's files show in the timeline from the folder, as Discord's
+  copy goes with the message. `msglog::local_url` gives a saved attachment's
+  `file://` address; `OpenChannel::publish` takes a deleted picture's preview
+  from it (`render::preview` decodes it where it lies, and
+  `msglog::local_path` names only files inside `MsgLogData`), and the viewer,
+  Save and Copy read it too (`OpenChannel::saved`). `logger::shown_content`
+  ends a deleted message with `Saved copy: ` and each saved file's path, which
+  shows in the timeline and the log window alike. A video or other file
+  isn't played or opened from the folder: the line says where it is.
 - The message log window is the clock button at the right of a channel's
   header, beside the pins and the member list (`Action::ShowMessageLog`,
   `LogPopover` in `ui/header.slint`, built like the pins popup). Its tabs list,

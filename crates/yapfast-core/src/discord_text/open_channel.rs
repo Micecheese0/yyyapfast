@@ -1290,9 +1290,10 @@ impl OpenChannel {
                 .insert(url.clone(), picture.clone());
         }
         for (order, message) in &self.shown.messages {
-            if message.attachments.iter().any(|attachment| {
+            if message.attachments.iter().enumerate().any(|(index, attachment)| {
                 attachment.preview_url.as_ref() == Some(&url)
                     || attachment.still_url.as_ref() == Some(&url)
+                    || saved_picture(message, index).as_ref() == Some(&url)
             }) {
                 self.rendered.remove(order);
             }
@@ -1311,13 +1312,25 @@ impl OpenChannel {
             return false;
         }
         self.visible = visible;
-        let urls: HashSet<_> = self
+        let urls: HashSet<String> = self
             .shown
             .messages
             .iter()
             .filter(|(order, _)| self.visible.contains(order))
-            .flat_map(|(_, message)| &message.attachments)
-            .flat_map(|attachment| attachment.preview_url.iter().chain(&attachment.still_url))
+            .flat_map(|(_, message)| {
+                message
+                    .attachments
+                    .iter()
+                    .enumerate()
+                    .flat_map(move |(index, attachment)| {
+                        attachment
+                            .preview_url
+                            .iter()
+                            .chain(&attachment.still_url)
+                            .cloned()
+                            .chain(saved_picture(message, index))
+                    })
+            })
             .collect();
         self.pictures.retain(|url, _| urls.contains(url));
         self.requested.retain(|url| urls.contains(url));
@@ -1329,7 +1342,7 @@ impl OpenChannel {
             !shown.get(order).is_some_and(|message| {
                 message.attachments.iter().any(|attachment| {
                     attachment.preview_url.is_some() || attachment.still_url.is_some()
-                })
+                }) || (message.deleted && !message.attachments.is_empty())
             })
         });
         true
@@ -1441,6 +1454,16 @@ impl OpenChannel {
             .and_then(|message| message.attachments.get(index))
     }
 
+    /// The address of the file the message log saved of a deleted message's
+    /// attachment at `index`, which Discord no longer has.
+    fn saved(&self, item: &str, index: usize) -> Option<String> {
+        let message = sent_id(item).and_then(|id| self.message(id.parse().unwrap_or_default()))?;
+        message
+            .deleted
+            .then(|| yapfast_discord::msglog::local_url(message, index))
+            .flatten()
+    }
+
     pub fn save(
         &mut self,
         discord: &Discord,
@@ -1455,7 +1478,10 @@ impl OpenChannel {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         let room = self.room.clone();
-        let Some(url) = attachment.map(|attachment| attachment.url.clone()) else {
+        let Some(url) = self
+            .saved(item, index)
+            .or_else(|| attachment.map(|attachment| attachment.url.clone()))
+        else {
             let _ = done.send(Done::Saved {
                 room,
                 name,
@@ -1485,12 +1511,14 @@ impl OpenChannel {
         index: usize,
     ) {
         let room = self.room.clone();
-        let Some(url) = self.attachment(item, index).map(|attachment| {
-            attachment
-                .still_url
-                .as_deref()
-                .unwrap_or(&attachment.url)
-                .to_owned()
+        let Some(url) = self.saved(item, index).or_else(|| {
+            self.attachment(item, index).map(|attachment| {
+                attachment
+                    .still_url
+                    .as_deref()
+                    .unwrap_or(&attachment.url)
+                    .to_owned()
+            })
         }) else {
             let _ = done.send(Done::Copied {
                 room,
@@ -1518,6 +1546,34 @@ impl OpenChannel {
         index: usize,
     ) {
         let room = self.room.clone();
+        // A deleted message's picture the log saved opens from disk.
+        if let Some(file) = self
+            .saved(&item, index)
+            .and_then(|url| yapfast_discord::msglog::local_path(&url))
+        {
+            let done = done.clone();
+            self.tasks.spawn(async move {
+                let picture = tokio::task::spawn_blocking(move || {
+                    crate::chat::decode_picture_at(
+                        &file,
+                        crate::chat::VIEW_WIDTH,
+                        crate::chat::VIEW_HEIGHT,
+                    )
+                })
+                .await
+                .ok()
+                .flatten()
+                .map(Arc::new)
+                .ok_or("Yapfast can't show this image. Save it to open it elsewhere.");
+                let _ = done.send(Done::Image {
+                    room,
+                    item,
+                    index,
+                    picture,
+                });
+            });
+            return;
+        }
         let Some(url) = self
             .attachment(&item, index)
             .and_then(|attachment| attachment.view_url.clone())
@@ -1751,7 +1807,16 @@ impl OpenChannel {
         let attachments = message
             .attachments
             .iter()
-            .map(|attachment| {
+            .enumerate()
+            .map(|(index, attachment)| {
+                // A deleted message's file the log saved shows, and opens,
+                // from disk: Discord's copy goes with the message.
+                let saved = message
+                    .deleted
+                    .then(|| yapfast_discord::msglog::local_url(message, index))
+                    .flatten();
+                let saved_picture = saved_picture(message, index);
+                let preview_url = saved_picture.as_ref().or(attachment.preview_url.as_ref());
                 let mut preview_of = |url: &String| match self.pictures.get(url) {
                     Some(picture) => Some(picture.clone()),
                     None => {
@@ -1770,7 +1835,7 @@ impl OpenChannel {
                         None
                     }
                 };
-                let mut preview = attachment.preview_url.as_ref().and_then(&mut preview_of);
+                let mut preview = preview_url.and_then(&mut preview_of);
                 // A GIF's video that can't be shown gives way to its picture.
                 if matches!(preview, Some(None))
                     && let Some(still) = &attachment.still_url
@@ -1780,7 +1845,7 @@ impl OpenChannel {
                 Attachment {
                     name: attachment.name.clone(),
                     size: attachment.size,
-                    image: attachment.image && attachment.preview_url.is_some(),
+                    image: attachment.image && preview_url.is_some(),
                     dimensions: attachment.dimensions,
                     preview_failed: matches!(preview, Some(None)),
                     preview: preview.flatten(),
@@ -1794,12 +1859,12 @@ impl OpenChannel {
                     spoiler: attachment.spoiler,
                     video: attachment.video_url.is_some(),
                     gif: super::gifs::favorite_gif(attachment),
-                    url: Some(
+                    url: Some(saved.unwrap_or_else(|| {
                         attachment
                             .link_url
                             .clone()
-                            .unwrap_or_else(|| attachment.url.clone()),
-                    ),
+                            .unwrap_or_else(|| attachment.url.clone())
+                    })),
                     description: attachment.description.clone(),
                 }
             })
@@ -2054,6 +2119,15 @@ fn carry_history(old: Option<&Message>, new: &mut Message) {
     {
         new.history = old.history.clone();
     }
+}
+
+/// The address a deleted message's picture at `index` shows from: the file the
+/// message log saved of it, if it did.
+fn saved_picture(message: &Message, index: usize) -> Option<String> {
+    let attachment = message.attachments.get(index)?;
+    (message.deleted && attachment.image && attachment.video_url.is_none())
+        .then(|| yapfast_discord::msglog::local_url(message, index))
+        .flatten()
 }
 
 /// Applies an edit, a deletion or a reaction in `channel` to the messages

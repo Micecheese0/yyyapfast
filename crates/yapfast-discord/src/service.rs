@@ -3742,6 +3742,12 @@ impl Discord {
     }
 
     async fn fetch(&self, url: &str, limit: usize, queued: bool) -> Result<Vec<u8>> {
+        // A deleted message's file, which the message log saved.
+        if let Some(file) = crate::msglog::local_path(url) {
+            let data = tokio::task::spawn_blocking(move || std::fs::read(file)).await??;
+            anyhow::ensure!(data.len() <= limit, "the file is too large");
+            return Ok(data);
+        }
         // An activity names a game's icon by the game until Discord says
         // which picture it is.
         let icon;
