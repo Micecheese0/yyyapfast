@@ -1107,12 +1107,15 @@ export component YapfastWindow inherits Window {
     in property <int> message-log-tab;
     /// It is a server's, which opens by the rail and not under the button.
     in property <bool> message-log-server;
+    in property <bool> message-log-more;
+    in property <bool> message-log-loading-more;
     in property <string> message-log-title: "Message log";
     in property <bool> message-log-oldest-first;
     callback show-message-log(bool);
     callback set-log-tab(int);
     callback toggle-log-order;
     callback open-deleted-log;
+    callback show-more-log;
     /// The header's pin button's bottom right corner, under which the pins open.
     property <length> pins-anchor-x;
     property <length> pins-anchor-y;
@@ -4663,6 +4666,8 @@ export component YapfastWindow inherits Window {
             height: min(self.fit, 640px, root.height - self.y - 16px);
             entries: root.message-log; note: root.message-log-note; tab: root.message-log-tab;
             title: root.message-log-title; oldest-first: root.message-log-oldest-first;
+            more: root.message-log-more; loading-more: root.message-log-loading-more;
+            show-more => { root.show-more-log(); }
             toggle-order => { root.toggle-log-order(); }
             chose-tab(tab) => { root.set-log-tab(tab); }
             open-link(link) => { root.open-link(link); }

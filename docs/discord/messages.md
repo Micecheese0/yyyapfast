@@ -1044,14 +1044,20 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   the channels and threads the snapshot lists, and those the index below has
   of the server, so a channel it lost is in it). A channel's name goes above
   each message whenever the list holds messages of more than one channel.
+- The window lists the newest 1000 of each channel (`chat::LOG_PAGE`,
+  `msglog::entries_newest`, which a purged channel's thousands of messages
+  would otherwise all load). When the log holds more, a *Load more messages*
+  button ends the list, and a click asks for another 1000 of each channel
+  (`Action::ShowMoreLog`, `MessageLog::most`): `Event::MessageLog` says
+  whether `more` remain, and the list stays as it is until the longer one
+  comes.
 - A deleted channel or server takes its messages with it, though Discord sends
   no deletion for each: on CHANNEL_DELETE, or a GUILD_DELETE without
   `unavailable` (a server deleted, or one the account left or was removed
   from), `Session::event` appends a `{"t":"x"}` line to the files of its
   channels and threads (`msglog::gone`), and `msglog::entries` reads every
-  message before such a line as deleted, the newest 1000 of a channel
-  (`entries_newest`). Messages that come after it, if the server is back,
-  aren't. `MsgLogData/places.json` is the index that says which server each
+  message before such a line as deleted. Messages that come after it, if the
+  server is back, aren't. `MsgLogData/places.json` is the index that says which server each
   logged channel is in and what both were called, since a file's name says
   neither and Discord lists neither once they're gone: `msglog::place` writes
   a channel's entry with its first logged message, and CHANNEL_UPDATE and

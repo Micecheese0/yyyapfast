@@ -48,10 +48,14 @@ impl Application {
         let mut effects = self.close_threads();
         self.state.message_log = Some(MessageLog {
             room: room.clone(),
+            most: chat::LOG_PAGE,
             ..MessageLog::default()
         });
         effects.push(Effect::Backend(Command::Discord(
-            DiscordCommand::MessageLog { room },
+            DiscordCommand::MessageLog {
+                room,
+                most: chat::LOG_PAGE,
+            },
         )));
         effects
     }
@@ -67,10 +71,14 @@ impl Application {
         self.state.message_log = Some(MessageLog {
             room: server.clone(),
             server: true,
+            most: chat::LOG_PAGE,
             ..MessageLog::default()
         });
         effects.push(Effect::Backend(Command::Discord(
-            DiscordCommand::ServerLog { server },
+            DiscordCommand::ServerLog {
+                server,
+                most: chat::LOG_PAGE,
+            },
         )));
         effects
     }
@@ -84,18 +92,48 @@ impl Application {
             room: chat::DELETED_LOG.to_owned(),
             server: true,
             gone: true,
+            most: chat::LOG_PAGE,
             ..MessageLog::default()
         });
         effects.push(Effect::Backend(Command::Discord(
-            DiscordCommand::DeletedLog,
+            DiscordCommand::DeletedLog {
+                most: chat::LOG_PAGE,
+            },
         )));
         effects
+    }
+
+    /// Asks the open message log for a page more of each channel's messages;
+    /// the ones it has stay in the list until they come.
+    pub(super) fn show_more_log(&mut self) -> Vec<Effect> {
+        let Some(log) = self.state.message_log.as_mut().filter(|log| log.more) else {
+            return vec![];
+        };
+        log.most += chat::LOG_PAGE;
+        log.more = false;
+        log.loading_more = true;
+        let most = log.most;
+        let discord = if log.gone {
+            DiscordCommand::DeletedLog { most }
+        } else if log.server {
+            DiscordCommand::ServerLog {
+                server: log.room.clone(),
+                most,
+            }
+        } else {
+            DiscordCommand::MessageLog {
+                room: log.room.clone(),
+                most,
+            }
+        };
+        vec![Effect::Backend(Command::Discord(discord))]
     }
 
     pub(super) fn message_log_came(
         &mut self,
         room: String,
         result: Result<Vec<chat::LogEntry>, String>,
+        more: bool,
     ) {
         if let Some(log) = self
             .state
@@ -104,6 +142,8 @@ impl Application {
             .filter(|log| log.room == room)
         {
             log.entries = Some(result);
+            log.more = more;
+            log.loading_more = false;
         }
     }
 

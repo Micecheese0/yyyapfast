@@ -1684,6 +1684,14 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     }
     {
         let (adapter, weak) = (adapter.clone(), window.as_weak());
+        window.on_show_more_log(move || {
+            if let Some(window) = weak.upgrade() {
+                adapter.borrow_mut().action(&window, Action::ShowMoreLog);
+            }
+        });
+    }
+    {
+        let (adapter, weak) = (adapter.clone(), window.as_weak());
         window.on_open_deleted_log(move || {
             if let Some(window) = weak.upgrade() {
                 adapter.borrow_mut().action(&window, Action::OpenDeletedLog);

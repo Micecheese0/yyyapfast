@@ -289,8 +289,12 @@ export component LogPopover inherits Rectangle {
     in property <string> title: "Message log";
     /// The oldest entry first, rather than the newest.
     in property <bool> oldest-first;
+    /// The log holds more than the list shows, which the button at its end asks for.
+    in property <bool> more;
+    in property <bool> loading-more;
     callback chose-tab(int);
     callback toggle-order;
+    callback show-more;
     callback open-link(string);
     callback close;
     property <[string]> tabs: ["Deleted", "Ghost pings", "Edited", "Mass deletions"];
@@ -368,6 +372,23 @@ export component LogPopover inherits Rectangle {
                     FoundCard {
                         found: entry;
                         open-link(link) => { root.open-link(link); }
+                    }
+                }
+                // At the end of the list: the next page of messages.
+                if root.more || root.loading-more: Rectangle {
+                    height: 36px; border-radius: 6px;
+                    background: more-touch.has-hover && !root.loading-more ? Theme.hover : transparent;
+                    accessible-role: button;
+                    accessible-label: root.loading-more ? "Loading more messages" : "Load more messages";
+                    accessible-action-default => { if !root.loading-more { root.show-more(); } }
+                    Text {
+                        text: root.loading-more ? "Loading more messages..." : "Load more messages";
+                        color: Theme.secondary; font-size: 13px; font-weight: 600;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    more-touch := TouchArea {
+                        mouse-cursor: root.loading-more ? MouseCursor.default : MouseCursor.pointer;
+                        clicked => { if !root.loading-more { root.show-more(); } }
                     }
                 }
             }

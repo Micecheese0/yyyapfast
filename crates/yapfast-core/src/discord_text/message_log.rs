@@ -5,10 +5,6 @@
 use super::{commands::NOT_DISCORD, render::found_in, *};
 use crate::chat::LogEntry;
 
-/// The most messages one channel's part of a list holds, the newest: all of a
-/// deleted channel's are deleted.
-const MOST: usize = 1000;
-
 /// One channel's part of a list.
 struct Part {
     /// What heads the channel's messages, for a list of more than one
@@ -39,14 +35,14 @@ pub(super) fn command(
     // One channel's log, by its room id; a server's, by its id, which lists
     // its channels' by name, those deleted since too; or what was deleted, of
     // every server.
-    let (key, places) = match command {
-        Command::Discord(DiscordCommand::MessageLog { room }) => {
+    let (key, places, most) = match command {
+        Command::Discord(DiscordCommand::MessageLog { room, most }) => {
             let place = discord::parse_room(&room)
                 .map(|(guild, channel)| (guild.to_owned(), channel.to_owned()));
             let places = place.map(|(guild, channel)| vec![(guild, channel, String::new())]);
-            (room, places)
+            (room, places, most)
         }
-        Command::Discord(DiscordCommand::ServerLog { server }) => {
+        Command::Discord(DiscordCommand::ServerLog { server, most }) => {
             let places = match (&discord, discord::parse_server(&server)) {
                 (Ok(discord), Some(guild)) => {
                     let snapshot = discord.snapshots().borrow().clone();
@@ -82,9 +78,9 @@ pub(super) fn command(
                 }
                 _ => None,
             };
-            (server, places)
+            (server, places, most)
         }
-        Command::Discord(DiscordCommand::DeletedLog) => {
+        Command::Discord(DiscordCommand::DeletedLog { most }) => {
             let places = discord.is_ok().then(|| {
                 yapfast_discord::msglog::gone_places()
                     .into_iter()
@@ -94,7 +90,7 @@ pub(super) fn command(
                     })
                     .collect()
             });
-            (crate::chat::DELETED_LOG.to_owned(), places)
+            (crate::chat::DELETED_LOG.to_owned(), places, most)
         }
         other => return Some(other),
     };
@@ -109,13 +105,19 @@ pub(super) fn command(
                     .clone()
                     .unwrap_or_default();
                 let mut parts = Vec::new();
+                let mut more = false;
                 for (guild, channel, name) in places {
                     let id = channel.clone();
-                    let entries = tokio::task::spawn_blocking(move || {
-                        yapfast_discord::msglog::entries_newest(&id, MOST)
+                    // One more than `most`, to tell whether there are more.
+                    let mut entries = tokio::task::spawn_blocking(move || {
+                        yapfast_discord::msglog::entries_newest(&id, most.saturating_add(1))
                     })
                     .await
                     .unwrap_or_default();
+                    if entries.len() > most {
+                        entries.remove(0);
+                        more = true;
+                    }
                     if entries.is_empty() {
                         continue;
                     }
@@ -136,6 +138,7 @@ pub(super) fn command(
                 let _ = events.send(Event::MessageLog {
                     room: key.clone(),
                     result: Ok(list(&parts, &me)),
+                    more,
                 });
                 for part in &mut parts {
                     saved_pictures(&discord, &part.messages, &mut part.found).await;
@@ -143,6 +146,7 @@ pub(super) fn command(
                 let _ = events.send(Event::MessageLog {
                     room: key,
                     result: Ok(list(&parts, &me)),
+                    more,
                 });
             });
         }
@@ -150,6 +154,7 @@ pub(super) fn command(
             let _ = events.send(Event::MessageLog {
                 room: key,
                 result: Err(discord.err().unwrap_or(NOT_DISCORD).into()),
+                more: false,
             });
         }
     }

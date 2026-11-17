@@ -2311,6 +2311,8 @@ impl Adapter {
         window.set_message_log_open(log.is_some());
         window.set_message_log_server(log.is_some_and(|log| log.server));
         window.set_message_log_oldest_first(log.is_some_and(|log| log.oldest_first));
+        window.set_message_log_more(log.is_some_and(|log| log.more));
+        window.set_message_log_loading_more(log.is_some_and(|log| log.loading_more));
         window.set_message_log_title(
             if log.is_some_and(|log| log.gone) {
                 "Deleted servers and channels"

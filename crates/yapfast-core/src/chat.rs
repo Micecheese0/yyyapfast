@@ -445,6 +445,10 @@ pub struct Bypass {
     pub force_clips: bool,
 }
 
+/// How many messages of each channel the message log window lists, and how
+/// many more each *Load more* adds.
+pub const LOG_PAGE: usize = 1000;
+
 /// The room [`Event::MessageLog`] names for the list of what was deleted.
 pub const DELETED_LOG: &str = "deleted";
 
@@ -3027,16 +3031,21 @@ pub enum DiscordCommand {
     /// purged; [`Event::MessageLog`] follows.
     MessageLog {
         room: String,
+        /// The most it lists of the channel, the newest.
+        most: usize,
     },
     /// What the message log holds of every channel of a Discord server, by its
     /// id; [`Event::MessageLog`] follows, with the server's id as its room.
     ServerLog {
         server: String,
+        most: usize,
     },
     /// What the message log holds of the channels and servers that were
     /// deleted; [`Event::MessageLog`] follows, with [`DELETED_LOG`] as its
     /// room.
-    DeletedLog,
+    DeletedLog {
+        most: usize,
+    },
     /// A page of a Discord server channel's threads, by its room id, as its
     /// list of threads shows them: the archived ones from the `offset`th,
     /// or with a `query`, those of any kind whose name it finds.
@@ -4409,6 +4418,8 @@ pub enum Event {
     MessageLog {
         room: String,
         result: Result<Vec<LogEntry>, String>,
+        /// The log holds more messages than the `most` asked for.
+        more: bool,
     },
     /// [`DiscordCommand::StartThread`]'s thread, by room id, in the channel
     /// `room`, or why it didn't start.

@@ -274,6 +274,12 @@ pub struct MessageLog {
     /// The channel's logged messages, the latest first; `None` while they're
     /// on their way.
     pub entries: Option<Result<Vec<chat::LogEntry>, String>>,
+    /// The most messages of each channel it asks for, which *Load more* raises.
+    pub most: usize,
+    /// The log holds more than `entries` has.
+    pub more: bool,
+    /// More were asked for, and are on their way.
+    pub loading_more: bool,
 }
 
 impl MessageLog {
@@ -1926,6 +1932,8 @@ pub enum Action {
     OpenDeletedLog,
     /// Swap the message log window between the newest first and the oldest.
     ToggleLogOrder,
+    /// List more of what the message log window holds.
+    ShowMoreLog,
     /// Reads the message log's rules, which the folder keeps.
     LoadLogRules,
     /// Adds the server or channel, by id, to the message log's list, or takes
@@ -3657,6 +3665,7 @@ impl Application {
             }
             Action::OpenServerLog(server) => self.open_server_log(server),
             Action::OpenDeletedLog => self.open_deleted_log(),
+            Action::ShowMoreLog => self.show_more_log(),
             Action::ToggleLogOrder => {
                 if let Some(log) = &mut self.state.message_log {
                     log.oldest_first = !log.oldest_first;
@@ -4491,7 +4500,7 @@ impl Application {
             }
             Event::ThreadOpened { room, result } => self.thread_opened(room, result),
             Event::Pins { room, result } => self.pins_came(room, result),
-            Event::MessageLog { room, result } => self.message_log_came(room, result),
+            Event::MessageLog { room, result, more } => self.message_log_came(room, result, more),
             Event::GifCategories(result) => self.gif_categories_came(result),
             Event::Gifs { query, result } => self.gifs_came(query, result),
             Event::GifSuggestions { query, terms } => self.gif_suggestions_came(query, terms),
