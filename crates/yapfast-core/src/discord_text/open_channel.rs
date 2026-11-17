@@ -801,14 +801,20 @@ impl OpenChannel {
             let result = async {
                 let mut read = Vec::with_capacity(files.len());
                 for (path, name, spoiler, clip) in files {
-                    let mut data = tokio::fs::read(&path)
+                    let data = tokio::fs::read(&path)
                         .await
                         .map_err(|_| format!("Yapfast could not read {name}."))?;
-                    let name = if clip {
-                        yapfast_discord::api::mark_clip(&mut data);
-                        clip_name(&name)
+                    let (name, data) = if clip {
+                        // Rewriting a video of up to 100 MB isn't for the
+                        // thread that runs the application.
+                        let data = tokio::task::spawn_blocking(move || {
+                            yapfast_discord::api::make_clip(data)
+                        })
+                        .await
+                        .map_err(|_| format!("Yapfast could not prepare {name}."))?;
+                        (clip_name(&name), data)
                     } else {
-                        name
+                        (name, data)
                     };
                     read.push((upload_name(&name, spoiler), data));
                 }

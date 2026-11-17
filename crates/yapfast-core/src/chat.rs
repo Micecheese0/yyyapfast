@@ -441,6 +441,8 @@ pub struct Bypass {
     /// An MP4 or MOV video up to [`CLIP_LIMIT`] goes as a
     /// clip, when it is larger than this account's file limit.
     pub clips: bool,
+    /// With `clips`, every MP4 or MOV video goes as a clip, whatever its size.
+    pub force_clips: bool,
 }
 
 /// A file size as people read it: bytes, KB, then MB.

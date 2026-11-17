@@ -496,18 +496,19 @@ fn path_can_clip(path: &std::path::Path) -> bool {
 
 impl AppState {
     /// Whether `file`, staged in room `id`, goes as a clip: the clips switch is
-    /// on, it is a video a clip can carry, and it is larger than the file limit
-    /// of the room, but within a clip's.
+    /// on, it is a video a clip can carry within a clip's limit, and it is
+    /// larger than the file limit of the room, or the force switch is on.
     pub(super) fn goes_as_clip(&self, id: &str, file: &chat::Staged) -> bool {
         self.bypass.clips
             && Network::of(id) == Network::Discord
             && chat::can_clip(&file.name)
             && file.size <= chat::CLIP_LIMIT
-            && self
-                .rooms
-                .iter()
-                .find(|room| room.id == id)
-                .is_some_and(|room| file.size > room.upload_limit)
+            && (self.bypass.force_clips
+                || self
+                    .rooms
+                    .iter()
+                    .find(|room| room.id == id)
+                    .is_some_and(|room| file.size > room.upload_limit))
     }
 }
 

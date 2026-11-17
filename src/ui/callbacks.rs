@@ -2274,6 +2274,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         layout.free_emoji = window.get_free_emoji();
         layout.free_stickers = window.get_free_stickers();
         layout.clip_bypass = window.get_clip_bypass();
+        layout.force_clip = window.get_force_clip();
         layout.nameplates = Some(window.get_show_nameplates());
         layout.collapse_long = window.get_collapse_long();
         layout.animate = chosen(&ANIMATES, window.get_animate());

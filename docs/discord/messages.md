@@ -261,8 +261,14 @@ Yapfast is back, rather than showing an error.
   - *Send large videos as clips.* Discord takes a clip up to 100 MB
     (`api::CLIP_LIMIT`) from any account. A staged MP4, M4V or MOV larger
     than the room's file limit, up to that, is a clip
-    (`AppState::goes_as_clip`, `OutgoingFile::clip`): when it goes, its
-    bytes end with Discord's clip mark (`api::mark_clip`), its upload asks
+    (`AppState::goes_as_clip`, `OutgoingFile::clip`); *Send every video as a
+    clip* makes a smaller one a clip too. A clip is a file Discord's servers
+    read as MP4 ending in the clip mark: when it goes, `api::make_clip`
+    rewrites the video as ffmpeg's `-c copy -movflags +faststart -brand
+    isom/avc1 -map_metadata -1` does (`api::normalize_mp4`: an `isom` file
+    type box, the `moov` index before the `mdat`, chunk offsets moved with it,
+    no `udta` or `meta` tags; a fragmented file is left as it is) and ends it
+    with the mark (`api::mark_clip`). Its upload asks
     `is_clip: true`, and its attachment in the message carries `is_clip`,
     `clip_created_at`, `clip_participant_ids` and `application_id`, as a
     clip recorded by Discord does. It goes under an `.mp4` name. Other kinds

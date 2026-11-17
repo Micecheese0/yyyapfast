@@ -1269,6 +1269,7 @@ struct Layout {
     free_emoji: bool,
     free_stickers: bool,
     clip_bypass: bool,
+    force_clip: bool,
     /// Nameplates show; on unless turned off.
     nameplates: Option<bool>,
     /// Long messages fold to a few lines, with Show more; off unless turned
@@ -1480,6 +1481,7 @@ impl Layout {
             emoji: self.free_emoji,
             stickers: self.free_stickers,
             clips: self.clip_bypass,
+            force_clips: self.force_clip,
         }
     }
 
@@ -1670,6 +1672,7 @@ impl Layout {
         window.set_free_emoji(self.free_emoji);
         window.set_free_stickers(self.free_stickers);
         window.set_clip_bypass(self.clip_bypass);
+        window.set_force_clip(self.force_clip);
         window.set_show_nameplates(self.nameplates.unwrap_or(true));
         window.set_collapse_long(self.collapse_long);
         window.set_animate(choice(&ANIMATES, self.animate));
