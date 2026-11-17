@@ -75,6 +75,23 @@ impl Application {
         effects
     }
 
+    /// Opens the message log of the channels and servers that were deleted.
+    pub(super) fn open_deleted_log(&mut self) -> Vec<Effect> {
+        self.state.pins = None;
+        self.state.add_people = None;
+        let mut effects = self.close_threads();
+        self.state.message_log = Some(MessageLog {
+            room: chat::DELETED_LOG.to_owned(),
+            server: true,
+            gone: true,
+            ..MessageLog::default()
+        });
+        effects.push(Effect::Backend(Command::Discord(
+            DiscordCommand::DeletedLog,
+        )));
+        effects
+    }
+
     pub(super) fn message_log_came(
         &mut self,
         room: String,

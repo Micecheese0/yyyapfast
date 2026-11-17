@@ -445,11 +445,16 @@ pub struct Bypass {
     pub force_clips: bool,
 }
 
+/// The room [`Event::MessageLog`] names for the list of what was deleted.
+pub const DELETED_LOG: &str = "deleted";
+
 /// A message the message log holds, as its window lists it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LogEntry {
     pub message: ChatMessage,
-    /// The channel's name in a server's list; empty in one channel's.
+    /// What heads the channel's messages in a list of more than one
+    /// channel's: `#name`, with its server's name in front in the list of
+    /// what was deleted; empty in one channel's.
     pub channel: String,
     /// It was deleted.
     pub deleted: bool,
@@ -3028,6 +3033,10 @@ pub enum DiscordCommand {
     ServerLog {
         server: String,
     },
+    /// What the message log holds of the channels and servers that were
+    /// deleted; [`Event::MessageLog`] follows, with [`DELETED_LOG`] as its
+    /// room.
+    DeletedLog,
     /// A page of a Discord server channel's threads, by its room id, as its
     /// list of threads shows them: the archived ones from the `offset`th,
     /// or with a `query`, those of any kind whose name it finds.

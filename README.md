@@ -179,7 +179,8 @@ interested. Folders show up as they do in Discord.
   messages in the chat, marked, and what edited ones said before, with a
   log window of deleted, edited and purged messages and ghost pings, and a
   MsgLogData folder that saves messages and their pictures, GIFs and videos for the servers
-  and channels you choose. Voice
+  and channels you choose, and still lists them once the channel or server is
+  deleted. Voice
   messages play, with their speed and
   volume. Bots' buttons, dropdown menus and forms work too, radio buttons,
   checkboxes and file uploads included, and so do apps' slash commands: type

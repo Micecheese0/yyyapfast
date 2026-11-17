@@ -2312,7 +2312,9 @@ impl Adapter {
         window.set_message_log_server(log.is_some_and(|log| log.server));
         window.set_message_log_oldest_first(log.is_some_and(|log| log.oldest_first));
         window.set_message_log_title(
-            if log.is_some_and(|log| log.server) {
+            if log.is_some_and(|log| log.gone) {
+                "Deleted servers and channels"
+            } else if log.is_some_and(|log| log.server) {
                 "Server message log"
             } else {
                 "Message log"
@@ -2323,26 +2325,34 @@ impl Adapter {
         let entries = log.map(|log| log.shown()).unwrap_or_default();
         let shown: Vec<ChatMessage> = entries.iter().map(|entry| entry.message.clone()).collect();
         // A channel's name goes over its messages when the list holds those of
-        // more than one.
-        let named = entries
-            .iter()
-            .map(|entry| entry.channel.as_str())
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            > 1;
+        // more than one, and always in the list of what was deleted.
+        let named = log.is_some_and(|log| log.gone)
+            || entries
+                .iter()
+                .map(|entry| entry.channel.as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                > 1;
         let tab = log.map_or(0, |log| log.tab);
         window.set_message_log_tab(tab as i32);
+        let place = if log.is_some_and(|log| log.gone) {
+            "any deleted server or channel"
+        } else if log.is_some_and(|log| log.server) {
+            "this server"
+        } else {
+            "this channel"
+        };
         window.set_message_log_note(
             match log.map(|log| &log.entries) {
-                Some(None) => "Loading the message log...",
-                Some(Some(Err(error))) => error.as_str(),
+                Some(None) => "Loading the message log...".to_owned(),
+                Some(Some(Err(error))) => error.clone(),
                 Some(Some(Ok(_))) if shown.is_empty() => match tab {
-                    0 => "No deleted messages are logged for this channel.",
-                    1 => "No ghost pings are logged for this channel.",
-                    2 => "No edited messages are logged for this channel.",
-                    _ => "No mass deletions are logged for this channel.",
+                    0 => format!("No deleted messages are logged for {place}."),
+                    1 => format!("No ghost pings are logged for {place}."),
+                    2 => format!("No edited messages are logged for {place}."),
+                    _ => format!("No mass deletions are logged for {place}."),
                 },
-                _ => "",
+                _ => String::new(),
             }
             .into(),
         );
@@ -2367,11 +2377,7 @@ impl Adapter {
         }
         show_found(&self.models.message_log, &shown, twelve_hour);
         for (at, entry) in entries.iter().enumerate() {
-            let want = if named && !entry.channel.is_empty() {
-                format!("#{}", entry.channel)
-            } else {
-                String::new()
-            };
+            let want = if named { entry.channel.as_str() } else { "" };
             if let Some(mut row) = self.models.message_log.row_data(at)
                 && row.heading.as_str() != want
             {

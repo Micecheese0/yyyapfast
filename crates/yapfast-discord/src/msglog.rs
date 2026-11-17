@@ -31,7 +31,7 @@ use std::{
     },
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     api::Api,
@@ -54,6 +54,10 @@ static TURNS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
 static WHITELIST: AtomicBool = AtomicBool::new(false);
 static LISTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static PLACES: Mutex<Places> = Mutex::new(Places {
+    servers: BTreeMap::new(),
+    channels: BTreeMap::new(),
+});
 
 /// A kind of file the log keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,7 +137,203 @@ pub fn keep_in(root: PathBuf) {
         .unwrap_or_default();
     WHITELIST.store(rules.whitelist, Ordering::Relaxed);
     *lock(&LISTED) = rules.listed;
+    *lock(&PLACES) = std::fs::read(root.join("places.json"))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Places>(&data).ok())
+        .unwrap_or_default();
     *lock(&ROOT) = Some(root);
+}
+
+/// Which server each logged channel is in, and what the servers and channels
+/// were called, as `places.json` holds them: a channel's file names neither,
+/// and a deleted channel or server is in no list of Discord's any more.
+#[derive(Serialize, Deserialize, Default)]
+struct Places {
+    #[serde(default)]
+    servers: BTreeMap<String, Named>,
+    #[serde(default)]
+    channels: BTreeMap<String, ChannelPlace>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct Named {
+    name: String,
+    /// The server is deleted, or this account left it.
+    #[serde(default)]
+    gone: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct ChannelPlace {
+    guild: String,
+    name: String,
+    /// The channel is deleted, or its server is gone.
+    #[serde(default)]
+    gone: bool,
+}
+
+/// A logged channel of a server, as the log's lists name it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub guild: String,
+    pub guild_name: String,
+    pub channel: String,
+    pub name: String,
+    /// The channel is deleted, or its server is.
+    pub gone: bool,
+}
+
+fn save_places(places: &Places) {
+    let Some(root) = root() else {
+        return;
+    };
+    let written = std::fs::create_dir_all(&root)
+        .and_then(|()| std::fs::write(root.join("places.json"), serde_json::to_vec(places)?));
+    if let Err(error) = written {
+        tracing::warn!(%error, "could not write the message log's places");
+    }
+}
+
+/// Notes that `channel` is in `guild`, with the names `names` gives, unless
+/// the index has it already. Only a channel and a server whose messages are
+/// logged are noted, a few of them; `names` isn't called for the rest.
+pub fn place(guild: &str, channel: &str, names: impl FnOnce() -> Option<(String, String)>) {
+    if !logging()
+        || lock(&PLACES)
+            .channels
+            .get(channel)
+            .is_some_and(|known| known.guild == guild && !known.gone)
+    {
+        return;
+    }
+    let Some((server, name)) = names() else {
+        return;
+    };
+    let mut places = lock(&PLACES);
+    places.servers.insert(
+        guild.to_owned(),
+        Named {
+            name: server,
+            gone: false,
+        },
+    );
+    places.channels.insert(
+        channel.to_owned(),
+        ChannelPlace {
+            guild: guild.to_owned(),
+            name,
+            gone: false,
+        },
+    );
+    save_places(&places);
+}
+
+/// A channel of the index was renamed.
+pub fn rename_channel(channel: &str, name: &str) {
+    let mut places = lock(&PLACES);
+    if let Some(known) = places.channels.get_mut(channel)
+        && known.name != name
+    {
+        known.name = name.to_owned();
+        save_places(&places);
+    }
+}
+
+/// A server of the index was renamed.
+pub fn rename_server(guild: &str, name: &str) {
+    let mut places = lock(&PLACES);
+    if let Some(known) = places.servers.get_mut(guild)
+        && known.name != name
+    {
+        known.name = name.to_owned();
+        save_places(&places);
+    }
+}
+
+/// Channels and threads of `guild`, given by id and name, are deleted, or the
+/// server `server` names is: what the log holds of each shows as deleted from
+/// now. Those the index has of the server go with it.
+pub fn gone(guild: &str, server: Option<String>, channels: Vec<(String, String)>) {
+    if !logging() {
+        return;
+    }
+    let guild = guild.to_owned();
+    // A blocking task: it reads and writes files.
+    tokio::task::spawn_blocking(move || mark_gone(&guild, server, channels));
+}
+
+fn mark_gone(guild: &str, server: Option<String>, mut channels: Vec<(String, String)>) {
+    let mut places = lock(&PLACES);
+    if server.is_some() {
+        for (id, known) in &places.channels {
+            if known.guild == guild && !channels.iter().any(|(channel, _)| channel == id) {
+                channels.push((id.clone(), known.name.clone()));
+            }
+        }
+    }
+    let mut changed = false;
+    for (id, name) in channels {
+        // Only a channel whose messages were logged, once.
+        let logged = lines_file(&id).is_some_and(|file| file.is_file());
+        if !logged || places.channels.get(&id).is_some_and(|known| known.gone) {
+            continue;
+        }
+        append(&id, &[r#"{"t":"x"}"#.to_owned()]);
+        let known = places.channels.entry(id).or_insert_with(|| ChannelPlace {
+            guild: guild.to_owned(),
+            name,
+            gone: false,
+        });
+        known.gone = true;
+        changed = true;
+    }
+    if let Some(name) = server {
+        let known = places.servers.entry(guild.to_owned()).or_default();
+        if !name.is_empty() {
+            known.name = name;
+        }
+        known.gone = true;
+        changed = true;
+    }
+    if changed {
+        save_places(&places);
+    }
+}
+
+fn placed(places: &Places, id: &str, known: &ChannelPlace) -> Place {
+    Place {
+        guild: known.guild.clone(),
+        guild_name: places
+            .servers
+            .get(&known.guild)
+            .map(|server| server.name.clone())
+            .unwrap_or_default(),
+        channel: id.to_owned(),
+        name: known.name.clone(),
+        gone: known.gone || places.servers.get(&known.guild).is_some_and(|server| server.gone),
+    }
+}
+
+/// The logged channels of server `guild` the index knows of.
+pub fn places_of(guild: &str) -> Vec<Place> {
+    let places = lock(&PLACES);
+    places
+        .channels
+        .iter()
+        .filter(|(_, known)| known.guild == guild)
+        .map(|(id, known)| placed(&places, id, known))
+        .collect()
+}
+
+/// The channels that were deleted, or whose server was, of every server.
+pub fn gone_places() -> Vec<Place> {
+    let places = lock(&PLACES);
+    places
+        .channels
+        .iter()
+        .map(|(id, known)| placed(&places, id, known))
+        .filter(|place| place.gone)
+        .collect()
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -254,6 +454,10 @@ enum Entry {
         #[serde(default, rename = "b")]
         bulk: bool,
     },
+    /// The channel was deleted, or its server: every message before this line
+    /// is gone with it.
+    #[serde(rename = "x")]
+    Gone {},
 }
 
 /// What of a line tells which message it's of, without reading the rest.
@@ -457,6 +661,12 @@ pub fn logged(channel: &str) -> Vec<Message> {
 
 /// [`logged`], with how each went.
 pub fn entries(channel: &str) -> Vec<Logged> {
+    entries_newest(channel, usize::MAX)
+}
+
+/// [`entries`], the newest `most` of them: a deleted channel has all its
+/// messages to show.
+pub fn entries_newest(channel: &str, most: usize) -> Vec<Logged> {
     let Some(file) = lines_file(channel) else {
         return Vec::new();
     };
@@ -464,17 +674,22 @@ pub fn entries(channel: &str) -> Vec<Logged> {
     let Ok(first) = open() else {
         return Vec::new();
     };
-    // Which messages were deleted or edited, so the rest aren't read in full.
+    // Which messages were deleted or edited, so the rest aren't read in full;
+    // all of them when the channel was deleted.
     let mut wanted = HashSet::new();
+    let mut all = false;
     for line in first.lines().map_while(Result::ok) {
-        if let Ok(light) = serde_json::from_str::<Light>(&line)
-            && light.t != "c"
-            && let Some(id) = light.message()
-        {
-            wanted.insert(id.to_owned());
+        if let Ok(light) = serde_json::from_str::<Light>(&line) {
+            if light.t == "x" {
+                all = true;
+            } else if light.t != "c"
+                && let Some(id) = light.message()
+            {
+                wanted.insert(id.to_owned());
+            }
         }
     }
-    if wanted.is_empty() {
+    if wanted.is_empty() && !all {
         return Vec::new();
     }
     let Ok(second) = open() else {
@@ -486,7 +701,7 @@ pub fn entries(channel: &str) -> Vec<Logged> {
         let Ok(light) = serde_json::from_str::<Light>(&line) else {
             continue;
         };
-        if !light.message().is_some_and(|id| wanted.contains(id)) {
+        if !all && !light.message().is_some_and(|id| wanted.contains(id)) {
             continue;
         }
         let Ok(entry) = serde_json::from_str::<Entry>(&line) else {
@@ -495,6 +710,9 @@ pub fn entries(channel: &str) -> Vec<Logged> {
         match entry {
             Entry::Created { m } => {
                 messages.entry(m.order()).or_insert(m);
+                if messages.len() > most {
+                    messages.pop_first();
+                }
             }
             Entry::Edited { m } => {
                 let order = m.order();
@@ -518,6 +736,14 @@ pub fn entries(channel: &str) -> Vec<Logged> {
                         ..m
                     },
                 );
+                if messages.len() > most {
+                    messages.pop_first();
+                }
+            }
+            Entry::Gone {} => {
+                for message in messages.values_mut() {
+                    message.deleted = true;
+                }
             }
             Entry::Deleted { id, bulk } => {
                 let order = id.parse::<u64>().ok();
@@ -603,6 +829,39 @@ mod tests {
         assert!(!wants(Some("1"), "7"));
         assert!(super::logged("8").is_empty());
         assert!(super::logged("../x").is_empty());
+        // A deleted channel, or server, takes all its messages with it, those
+        // that came after it was back excepted.
+        set_whitelist(false);
+        set(Options {
+            messages: true,
+            ..Options::default()
+        });
+        append(
+            "9",
+            &[
+                line("c", &said("1", "one", false)),
+                line("c", &said("2", "two", false)),
+            ],
+        );
+        assert!(super::logged("9").is_empty());
+        place("5", "9", || Some(("Guild".into(), "old".into())));
+        assert_eq!(places_of("5").len(), 1);
+        assert!(gone_places().is_empty());
+        mark_gone("5", Some("Guild".into()), vec![("9".into(), "old".into())]);
+        assert_eq!(super::logged("9").len(), 2);
+        assert!(super::logged("9").iter().all(|m| m.deleted));
+        assert_eq!(super::entries_newest("9", 1).len(), 1);
+        let gone = gone_places();
+        assert_eq!(gone.len(), 1);
+        assert_eq!(
+            (gone[0].guild_name.as_str(), gone[0].name.as_str()),
+            ("Guild", "old")
+        );
+        // Marked once, and a message after it isn't gone.
+        mark_gone("5", None, vec![("9".into(), "old".into())]);
+        append("9", &[line("c", &said("3", "three", false))]);
+        let after: Vec<_> = super::logged("9").iter().map(|m| m.id.clone()).collect();
+        assert_eq!(after, ["1", "2"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

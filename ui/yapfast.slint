@@ -1112,6 +1112,7 @@ export component YapfastWindow inherits Window {
     callback show-message-log(bool);
     callback set-log-tab(int);
     callback toggle-log-order;
+    callback open-deleted-log;
     /// The header's pin button's bottom right corner, under which the pins open.
     property <length> pins-anchor-x;
     property <length> pins-anchor-y;
@@ -4505,6 +4506,7 @@ export component YapfastWindow inherits Window {
             keep-deleted <=> root.keep-deleted; keep-edits <=> root.keep-edits; log-bots <=> root.log-bots;
             archive <=> root.archive;
             log-mode: root.log-mode; log-mode-changed(mode) => { root.log-mode-changed(mode); }
+            open-deleted-log => { root.settings-open = false; root.open-deleted-log(); }
             image-size <=> root.log-image-size; gif-size <=> root.log-gif-size; video-size <=> root.log-video-size;
             preferences-changed => { root.preferences-changed(); }
         }

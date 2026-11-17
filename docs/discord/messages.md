@@ -1041,9 +1041,25 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   `MessageLog::shown` sorts by the message's time). A server's menu has *Open
   logs for server*, above *Copy link*, which opens the same window for every
   channel of the server (`DiscordCommand::ServerLog`, which reads the files of
-  the channels the snapshot lists, so a channel Discord no longer lists, or an
-  archived thread, isn't in it). A channel's name goes above each message
-  whenever the list holds messages of more than one channel.
+  the channels and threads the snapshot lists, and those the index below has
+  of the server, so a channel it lost is in it). A channel's name goes above
+  each message whenever the list holds messages of more than one channel.
+- A deleted channel or server takes its messages with it, though Discord sends
+  no deletion for each: on CHANNEL_DELETE, or a GUILD_DELETE without
+  `unavailable` (a server deleted, or one the account left or was removed
+  from), `Session::event` appends a `{"t":"x"}` line to the files of its
+  channels and threads (`msglog::gone`), and `msglog::entries` reads every
+  message before such a line as deleted, the newest 1000 of a channel
+  (`entries_newest`). Messages that come after it, if the server is back,
+  aren't. `MsgLogData/places.json` is the index that says which server each
+  logged channel is in and what both were called, since a file's name says
+  neither and Discord lists neither once they're gone: `msglog::place` writes
+  a channel's entry with its first logged message, and CHANNEL_UPDATE and
+  GUILD_UPDATE rename it. Settings → Message Logger has *Open logs of deleted
+  servers and channels* (`Action::OpenDeletedLog`, `DiscordCommand::DeletedLog`),
+  the window for every channel the index marks gone, headed with its server's
+  name and its own. A channel logged before the index existed is named by
+  its id until a message of it comes.
 - Which servers and channels are logged is a list in `MsgLogData/rules.json`:
   Settings → Message Logger chooses whether the log keeps all but the ones listed
   or only the ones listed, and a server's or channel's context menu has *Log

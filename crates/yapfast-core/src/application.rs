@@ -265,6 +265,8 @@ pub struct MessageLog {
     pub room: String,
     /// It lists a whole server's channels, and shows wherever it was opened.
     pub server: bool,
+    /// It lists the channels and servers that were deleted, of every server.
+    pub gone: bool,
     /// The oldest first, rather than the newest.
     pub oldest_first: bool,
     /// The tab: 0 deleted, 1 ghost pings, 2 edited, 3 mass deletions.
@@ -1920,6 +1922,8 @@ pub enum Action {
     SetLogTab(usize),
     /// Show the message log of every channel of a Discord server, by its id.
     OpenServerLog(String),
+    /// Show the message log of the channels and servers that were deleted.
+    OpenDeletedLog,
     /// Swap the message log window between the newest first and the oldest.
     ToggleLogOrder,
     /// Reads the message log's rules, which the folder keeps.
@@ -3652,6 +3656,7 @@ impl Application {
                 vec![]
             }
             Action::OpenServerLog(server) => self.open_server_log(server),
+            Action::OpenDeletedLog => self.open_deleted_log(),
             Action::ToggleLogOrder => {
                 if let Some(log) = &mut self.state.message_log {
                     log.oldest_first = !log.oldest_first;

@@ -668,6 +668,15 @@ impl Session<'_> {
         if crate::msglog::logging() {
             match (event, &message) {
                 (Event::MessageCreate | Event::MessageUpdate, Some(message)) => {
+                    // Which server a channel is in, and what they're called,
+                    // for the lists of a server's log and of what was deleted.
+                    if let (Event::MessageCreate, Some(guild)) = (event, data["guild_id"].as_str())
+                        && crate::msglog::wants(Some(guild), &message.channel_id)
+                    {
+                        crate::msglog::place(guild, &message.channel_id, || {
+                            self.tracker.place_names(guild, &message.channel_id)
+                        });
+                    }
                     crate::msglog::message(
                         &self.shared.api,
                         data["guild_id"].as_str(),
@@ -692,6 +701,33 @@ impl Session<'_> {
                         .collect(),
                     true,
                 ),
+                // A deleted channel, or server, takes its messages with it:
+                // what the log holds shows as deleted. A server's outage, or
+                // a kick the account is out of, isn't one.
+                (Event::ChannelDelete, _) => {
+                    if let (Some(guild), Some(id)) =
+                        (data["guild_id"].as_str(), data["id"].as_str())
+                    {
+                        let (_, channels) = self.tracker.places_under(guild, Some(id));
+                        crate::msglog::gone(guild, None, channels);
+                    }
+                }
+                (Event::GuildDelete, _) if data["unavailable"].as_bool() != Some(true) => {
+                    if let Some(guild) = data["id"].as_str() {
+                        let (name, channels) = self.tracker.places_under(guild, None);
+                        crate::msglog::gone(guild, Some(name), channels);
+                    }
+                }
+                (Event::ChannelUpdate, _) => {
+                    if let (Some(id), Some(name)) = (data["id"].as_str(), data["name"].as_str()) {
+                        crate::msglog::rename_channel(id, name);
+                    }
+                }
+                (Event::GuildUpdate, _) => {
+                    if let (Some(id), Some(name)) = (data["id"].as_str(), data["name"].as_str()) {
+                        crate::msglog::rename_server(id, name);
+                    }
+                }
                 _ => {}
             }
         }

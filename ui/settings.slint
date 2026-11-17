@@ -1361,6 +1361,7 @@ export component MessageLogSettings inherits VerticalLayout {
     /// The servers and channels the context menu lists: 0 log all but them, 1 log only them.
     in-out property <int> log-mode;
     callback log-mode-changed(int);
+    callback open-deleted-log;
     /// The largest file of each kind: 0 5 MB, 1 25 MB, 2 100 MB, 3 500 MB, 4 no limit.
     in-out property <int> image-size: 1;
     in-out property <int> gif-size: 1;
@@ -1405,6 +1406,15 @@ export component MessageLogSettings inherits VerticalLayout {
         controlled: true;
         current: root.log-mode;
         chosen(index) => { root.log-mode-changed(index); }
+    }
+    SettingsHeading { text: "DELETED SERVERS AND CHANNELS"; }
+    Text {
+        text: "What the log holds of a channel or server that was deleted, or that you left, shows as deleted. A server's logs also list its deleted channels.";
+        color: Theme.muted; font-size: 13px; wrap: word-wrap;
+    }
+    HorizontalLayout {
+        ActionButton { text: "Open logs of deleted servers and channels"; small: true; clicked => { root.open-deleted-log(); } }
+        Rectangle { horizontal-stretch: 1; }
     }
     SettingsHeading { text: "LARGEST FILE TO SAVE"; }
     Text { text: "Pictures"; color: Theme.secondary; font-size: 14px; }

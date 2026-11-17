@@ -5,13 +5,29 @@
 use super::{commands::NOT_DISCORD, render::found_in, *};
 use crate::chat::LogEntry;
 
+/// The most messages one channel's part of a list holds, the newest: all of a
+/// deleted channel's are deleted.
+const MOST: usize = 1000;
+
 /// One channel's part of a list.
 struct Part {
-    /// The channel's name, for a server's list; empty for one channel's.
+    /// What heads the channel's messages, for a list of more than one
+    /// channel's; empty for one channel's.
     name: String,
     entries: Vec<yapfast_discord::msglog::Logged>,
     messages: Vec<Message>,
     found: Vec<ChatMessage>,
+}
+
+/// A channel's heading: `#name`, with its server's before it when that's in
+/// the list.
+fn heading(server: &str, name: &str, id: &str) -> String {
+    let name = if name.is_empty() { id } else { name };
+    if server.is_empty() {
+        format!("#{name}")
+    } else {
+        format!("{server} #{name}")
+    }
 }
 
 /// Carries out a message log command, or gives back any other.
@@ -20,8 +36,9 @@ pub(super) fn command(
     discord: Result<&Discord, &str>,
     events: &UnboundedSender<Event>,
 ) -> Option<Command> {
-    // One channel's log, by its room id; or a server's, by its id, which
-    // lists its channels' with their names.
+    // One channel's log, by its room id; a server's, by its id, which lists
+    // its channels' by name, those deleted since too; or what was deleted, of
+    // every server.
     let (key, places) = match command {
         Command::Discord(DiscordCommand::MessageLog { room }) => {
             let place = discord::parse_room(&room)
@@ -33,7 +50,7 @@ pub(super) fn command(
             let places = match (&discord, discord::parse_server(&server)) {
                 (Ok(discord), Some(guild)) => {
                     let snapshot = discord.snapshots().borrow().clone();
-                    snapshot
+                    let mut places: Vec<(String, String, String)> = snapshot
                         .servers
                         .iter()
                         .find(|known| known.id == guild)
@@ -43,15 +60,41 @@ pub(super) fn command(
                                 .text_channels
                                 .iter()
                                 .chain(&known.server.voice_channels)
+                                .chain(&known.server.threads)
                                 .map(|channel| {
-                                    (guild.to_owned(), channel.id.clone(), channel.name.clone())
+                                    (
+                                        guild.to_owned(),
+                                        channel.id.clone(),
+                                        heading("", &channel.name, &channel.id),
+                                    )
                                 })
                                 .collect()
                         })
+                        .unwrap_or_default();
+                    // Channels the server lost, which no list of its has.
+                    for place in yapfast_discord::msglog::places_of(guild) {
+                        if !places.iter().any(|(_, id, _)| *id == place.channel) {
+                            let label = heading("", &place.name, &place.channel);
+                            places.push((place.guild, place.channel, label));
+                        }
+                    }
+                    Some(places)
                 }
                 _ => None,
             };
             (server, places)
+        }
+        Command::Discord(DiscordCommand::DeletedLog) => {
+            let places = discord.is_ok().then(|| {
+                yapfast_discord::msglog::gone_places()
+                    .into_iter()
+                    .map(|place| {
+                        let label = heading(&place.guild_name, &place.name, &place.channel);
+                        (place.guild, place.channel, label)
+                    })
+                    .collect()
+            });
+            (crate::chat::DELETED_LOG.to_owned(), places)
         }
         other => return Some(other),
     };
@@ -69,7 +112,7 @@ pub(super) fn command(
                 for (guild, channel, name) in places {
                     let id = channel.clone();
                     let entries = tokio::task::spawn_blocking(move || {
-                        yapfast_discord::msglog::entries(&id)
+                        yapfast_discord::msglog::entries_newest(&id, MOST)
                     })
                     .await
                     .unwrap_or_default();
