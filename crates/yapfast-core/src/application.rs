@@ -3660,7 +3660,7 @@ impl Application {
             Action::ShowMessageLog(shown) => self.show_message_log(shown),
             Action::SetLogTab(tab) => {
                 if let Some(log) = &mut self.state.message_log {
-                    log.tab = tab.min(3);
+                    log.tab = tab.min(4);
                 }
                 vec![]
             }
