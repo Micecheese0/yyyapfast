@@ -1,10 +1,9 @@
-# Builds Yapfast for Windows, on demand or on a
+# Builds Yapfast for Windows and Linux in one run, on demand or on a
 # push to nitro-bypasses: Actions > Build > Run workflow. Nothing is published
 # and no secrets are used; each platform's files are artifacts of the run.
 #
 #   windows   the installer (Yapfast-*-windows-x64-setup.exe) and the portable ZIP
-#
-# The Linux AppImage job is left out for now: it adds a lot of build time.
+#   linux     the AppImage and its .zsync file
 #
 # Windows is cross-built on Linux as scripts/build-windows does it, and Inno
 # Setup compiles the installer on a Windows runner, since Wine doesn't start on
@@ -81,5 +80,32 @@ jobs:
           path: |
             out/Yapfast-*-setup.exe
             zip/Yapfast-*-windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      # The runner's preinstalled SDKs leave too little room for the build.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v5
+        with:
+          # Nix refuses a shallow Git repository as a flake.
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ github.token }}
+      # A fresh runner installs Rust and fetches the crates for longer than
+      # scripts/package-linux.py gives cargo metadata.
+      - name: Fetch the toolchain and crates
+        run: nix develop path:./nix --command cargo fetch --locked
+      - run: scripts/build-appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: |
+            target/dist/linux/Yapfast-*.AppImage
+            target/dist/linux/Yapfast-*.AppImage.zsync
           if-no-files-found: error
           compression-level: 0
