@@ -1991,6 +1991,8 @@ component TextBlockView inherits VerticalLayout {
     in property <color> color: Theme.text;
     // Headings are in the strongest colour of their text, as in Discord's client.
     in property <color> heading-color: root.color;
+    /// A quote's text.
+    in property <color> quote-color: Theme.secondary;
     in property <int> max-lines;
     callback open-link(string);
     property <length> code-size: root.font-size * 0.875;
@@ -2021,7 +2023,7 @@ component TextBlockView inherits VerticalLayout {
                 min-width: 0px;
                 text: root.block.text; link-color: Theme.link;
                 // A quote's text is dimmer, but not its headings.
-                default-color: root.block.level == 4 || (root.block.quoted && root.block.level == 0) ? Theme.secondary
+                default-color: root.block.level == 4 || (root.block.quoted && root.block.level == 0) ? root.quote-color
                     : root.block.level >= 1 && root.block.level <= 3 ? root.heading-color : root.color;
                 default-font-size: root.block.level == 1 ? root.font-size * 1.5 : root.block.level == 2 ? root.font-size * 1.25
                     : root.block.level == 3 ? root.font-size
@@ -2041,10 +2043,11 @@ export component TextBlocks inherits VerticalLayout {
     in property <bool> framed;
     in property <color> color: Theme.text;
     in property <color> heading-color: root.color;
+    in property <color> quote-color: Theme.secondary;
     in property <int> max-lines;
     callback open-link(string);
     for block in root.blocks: TextBlockView {
-        block: block; font-size: root.font-size; framed: root.framed; color: root.color; heading-color: root.heading-color;
+        block: block; font-size: root.font-size; framed: root.framed; color: root.color; heading-color: root.heading-color; quote-color: root.quote-color;
         max-lines: root.max-lines;
         open-link(link) => { root.open-link(link); }
     }
@@ -3094,7 +3097,7 @@ export component MessageContent inherits VerticalLayout {
                             // An overlong word breaks, as in Discord's client, rather than widening the row.
                             min-width: 0px;
                             text: message.styled; link-color: Theme.link;
-                            default-color: message.deleted || message.delivery != "" ? Theme.muted : message.notice != "" ? Theme.secondary : Theme.text;
+                            default-color: message.deleted ? Theme.danger-text.mix(Theme.text, 0.55) : message.delivery != "" ? Theme.muted : message.notice != "" ? Theme.secondary : Theme.text;
                             // Discord's large emoji are 48 pixels where text's are 22.
                             default-font-size: message.jumbo ? root.message-font-size * 2.2 : root.message-font-size;
                             // A mention's card opens beside the pointer.
@@ -3105,7 +3108,9 @@ export component MessageContent inherits VerticalLayout {
                             accessible-role: text; accessible-label: "Message from " + message.author + ": " + message.body;
                             TextBlocks {
                                 blocks: message.blocks; font-size: root.message-font-size;
-                                color: message.deleted || message.delivery != "" ? Theme.muted : Theme.text;
+                                color: message.deleted ? Theme.danger-text.mix(Theme.text, 0.55) : message.delivery != "" ? Theme.muted : Theme.text;
+                                // What an edited message said before is quoted above it, greyer.
+                                quote-color: message.edited ? Theme.muted : Theme.secondary;
                                 open-link(link) => { root.link-clicked(link); }
                             }
                         }
