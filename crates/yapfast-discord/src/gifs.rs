@@ -1,7 +1,7 @@
 //! The GIFs the picker shows, and the account's favourites.
 //!
 //! The picker's GIFs come from Tenor's website, see [`crate::tenor`], which
-//! Discord's own provider, Klipy, which Yapfast doesn't use. Favourites live in the
+//! Discord's own provider, Klipy now, no longer serves. Favourites live in the
 //! second settings protobuf, `FrecencyUserSettings.favorite_gifs`, keyed by the
 //! GIF's page address.
 
@@ -11,10 +11,11 @@ use serde_json::Value;
 use crate::settings::{Field, VARINT, fields, put_bytes, put_varint};
 
 /// Where GIFs' pictures come from, which Discord's client loads directly.
-pub const HOSTS: [&str; 5] = [
+pub const HOSTS: [&str; 6] = [
     "media.tenor.com",
     "media.tenor.co",
     "c.tenor.com",
+    "static.klipy.com",
     "media.giphy.com",
     "i.giphy.com",
 ];
@@ -320,11 +321,9 @@ mod tests {
             "https://static.klipy.com/happy.webp"
         );
         assert_eq!(trending.preview.unwrap().id.as_deref(), Some("1"));
-        assert!(provider_media("https://media.tenor.com/a.webp"));
+        assert!(provider_media("https://static.klipy.com/a.webp"));
         assert!(provider_media("https://media2.giphy.com/media/x/giphy.gif"));
         assert!(!provider_media("https://example.com/a.gif"));
-        assert!(!provider_media("http://media.tenor.com/a.webp"));
-        // Klipy is no GIF source of Yapfast's.
-        assert!(!provider_media("https://static.klipy.com/a.webp"));
+        assert!(!provider_media("http://static.klipy.com/a.webp"));
     }
 }
