@@ -1,36 +1,14 @@
-//! GIFs as Discord's picker finds them, and the account's favourites.
+//! The GIFs the picker shows, and the account's favourites.
 //!
-//! Discord asks its GIF provider, Klipy now, through `/gifs/*`: trending
-//! categories for the picker's home, a search, and terms to suggest when a
-//! search finds little. Each GIF comes in the format asked for; Yapfast asks for
-//! `tinywebp`, as Discord's Linux client does, which its picture decoder
-//! animates. Favourites live in the second settings protobuf,
-//! `FrecencyUserSettings.favorite_gifs`, keyed by the GIF's page address.
+//! The picker's GIFs come from Tenor's website, see [`crate::tenor`], which
+//! Discord's own provider, Klipy now, no longer serves. Favourites live in the
+//! second settings protobuf, `FrecencyUserSettings.favorite_gifs`, keyed by the
+//! GIF's page address.
 
 use base64::Engine;
 use serde_json::Value;
 
 use crate::settings::{Field, VARINT, fields, put_bytes, put_varint};
-
-/// Whether the picker's GIFs come from Tenor's website, see [`crate::tenor`],
-/// rather than Discord's provider. One switch for the process, as the
-/// account's settings are, which the application sets when the setting changes.
-static TENOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Sets where the picker's GIFs come from: Tenor's website, or Discord's.
-pub fn use_tenor(on: bool) {
-    TENOR.store(on, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Whether the picker's GIFs come from Tenor's website.
-pub fn tenor() -> bool {
-    TENOR.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-/// The format the picker asks for: small animated WebP.
-pub const MEDIA_FORMAT: &str = "tinywebp";
-/// The language of category names and suggestions.
-pub const LOCALE: &str = "en-US";
 
 /// Where GIFs' pictures come from, which Discord's client loads directly.
 pub const HOSTS: [&str; 6] = [

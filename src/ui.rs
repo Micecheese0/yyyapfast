@@ -1270,8 +1270,6 @@ struct Layout {
     free_stickers: bool,
     clip_bypass: bool,
     force_clip: bool,
-    /// The GIF picker finds GIFs on Tenor's website; off unless turned on.
-    tenor_gifs: bool,
     /// Nameplates show; on unless turned off.
     nameplates: Option<bool>,
     /// Long messages fold to a few lines, with Show more; off unless turned
@@ -1675,7 +1673,6 @@ impl Layout {
         window.set_free_stickers(self.free_stickers);
         window.set_clip_bypass(self.clip_bypass);
         window.set_force_clip(self.force_clip);
-        window.set_tenor_gifs(self.tenor_gifs);
         window.set_show_nameplates(self.nameplates.unwrap_or(true));
         window.set_collapse_long(self.collapse_long);
         window.set_animate(choice(&ANIMATES, self.animate));
@@ -2468,7 +2465,6 @@ impl Adapter {
         app.dispatch(Action::SetCosmetics(layout.cosmetics()));
         app.dispatch(Action::StripTracking(layout.strip_tracking.unwrap_or(true)));
         app.dispatch(Action::SetBypass(layout.bypass()));
-        app.dispatch(Action::SetTenorGifs(layout.tenor_gifs));
         app.dispatch(Action::HideNameplates(!layout.nameplates.unwrap_or(true)));
         app.dispatch(Action::SetPinned(layout.pinned.clone()));
         let notifier = crate::notify::Notifier::start(open_from_notification, &root);
