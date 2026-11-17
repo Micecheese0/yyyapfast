@@ -12,6 +12,21 @@ use serde_json::Value;
 
 use crate::settings::{Field, VARINT, fields, put_bytes, put_varint};
 
+/// Whether the picker's GIFs come from Tenor's website, see [`crate::tenor`],
+/// rather than Discord's provider. One switch for the process, as the
+/// account's settings are, which the application sets when the setting changes.
+static TENOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets where the picker's GIFs come from: Tenor's website, or Discord's.
+pub fn use_tenor(on: bool) {
+    TENOR.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the picker's GIFs come from Tenor's website.
+pub fn tenor() -> bool {
+    TENOR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The format the picker asks for: small animated WebP.
 pub const MEDIA_FORMAT: &str = "tinywebp";
 /// The language of category names and suggestions.

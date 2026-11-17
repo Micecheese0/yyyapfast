@@ -574,6 +574,8 @@ pub struct AppState {
     pub skip_call_prompt: bool,
     /// The switches that let this account use what Discord keeps for Nitro.
     pub bypass: chat::Bypass,
+    /// The GIF picker finds GIFs on Tenor's website, not Discord's provider.
+    pub tenor_gifs: bool,
     /// The member list's Activity panel's feed, in Discord's order: what
     /// everyone this account knows is doing, not just one server.
     pub activity_feed: Arc<[crate::chat::FeedEntry]>,
@@ -2301,6 +2303,8 @@ pub enum Action {
     /// Sets which of Nitro's emoji, stickers and larger files any account
     /// may use.
     SetBypass(chat::Bypass),
+    /// Sets whether the GIF picker finds GIFs on Tenor's website.
+    SetTenorGifs(bool),
     /// Turns nameplates off, or on again.
     HideNameplates(bool),
     /// Leave out messages from people this account blocked, rather than
@@ -4020,6 +4024,16 @@ impl Application {
             }
             Action::StripTracking(strip) => {
                 self.state.strip_tracking = strip;
+                vec![]
+            }
+            Action::SetTenorGifs(on) => {
+                if self.state.tenor_gifs != on {
+                    self.state.tenor_gifs = on;
+                    #[cfg(feature = "discord")]
+                    yapfast_discord::gifs::use_tenor(on);
+                    // What the picker holds is the other provider's.
+                    self.state.gifs.forget_found();
+                }
                 vec![]
             }
             Action::SetBypass(bypass) => {

@@ -2605,6 +2605,17 @@ impl Discord {
 
     /// The GIF picker's home: trending terms with a GIF each.
     pub async fn gifs_trending(&self) -> Result<crate::gifs::Trending> {
+        if crate::gifs::tenor() {
+            let (explore, home) = futures_util::future::join(
+                self.api.tenor_page("/explore"),
+                self.api.tenor_page("/"),
+            )
+            .await;
+            return Ok(crate::gifs::Trending {
+                categories: crate::tenor::parse_categories(&explore?),
+                preview: crate::tenor::parse_gifs(&home?).into_iter().next(),
+            });
+        }
         Ok(crate::gifs::Trending::parse(
             &self.api.gifs_trending().await?,
         ))
@@ -2612,6 +2623,9 @@ impl Discord {
 
     /// The GIFs trending now.
     pub async fn gifs_trending_gifs(&self) -> Result<Vec<crate::gifs::Gif>> {
+        if crate::gifs::tenor() {
+            return Ok(crate::tenor::parse_gifs(&self.api.tenor_page("/").await?));
+        }
         Ok(crate::gifs::parse_list(
             &self.api.gifs_trending_gifs().await?,
         ))
@@ -2619,11 +2633,19 @@ impl Discord {
 
     /// GIFs for `query`.
     pub async fn gifs_search(&self, query: &str) -> Result<Vec<crate::gifs::Gif>> {
+        if crate::gifs::tenor() {
+            let page = self.api.tenor_page(&crate::tenor::search_path(query)).await?;
+            return Ok(crate::tenor::parse_gifs(&page));
+        }
         Ok(crate::gifs::parse_list(&self.api.gifs_search(query).await?))
     }
 
     /// Up to `limit` terms to try instead of `query`.
     pub async fn gifs_suggest(&self, query: &str, limit: u32) -> Result<Vec<String>> {
+        // Tenor's pages suggest nothing to search for instead.
+        if crate::gifs::tenor() {
+            return Ok(Vec::new());
+        }
         let terms = self.api.gifs_suggest(query, limit).await?;
         Ok(terms
             .as_array()
@@ -2635,6 +2657,10 @@ impl Discord {
 
     /// Tells the provider a search for `query` led to the GIF `id`.
     pub async fn gif_select(&self, id: &str, query: &str) -> Result<()> {
+        // Tenor's GIFs have no id of Discord's provider's to report.
+        if crate::gifs::tenor() {
+            return Ok(());
+        }
         self.api.gif_select(id, query).await
     }
 

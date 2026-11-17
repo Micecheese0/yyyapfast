@@ -2275,6 +2275,7 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         layout.free_stickers = window.get_free_stickers();
         layout.clip_bypass = window.get_clip_bypass();
         layout.force_clip = window.get_force_clip();
+        layout.tenor_gifs = window.get_tenor_gifs();
         layout.nameplates = Some(window.get_show_nameplates());
         layout.collapse_long = window.get_collapse_long();
         layout.animate = chosen(&ANIMATES, window.get_animate());
@@ -2345,6 +2346,8 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         adapter.app.dispatch(Action::StripTracking(strip_tracking));
         let bypass = adapter.layout.bypass();
         adapter.app.dispatch(Action::SetBypass(bypass));
+        let tenor_gifs = adapter.layout.tenor_gifs;
+        adapter.app.dispatch(Action::SetTenorGifs(tenor_gifs));
         adapter
             .app
             .dispatch(Action::HideNameplates(!window.get_show_nameplates()));

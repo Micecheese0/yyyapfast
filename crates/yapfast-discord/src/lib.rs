@@ -54,6 +54,7 @@ mod spotify;
 pub mod stickers;
 pub mod stream;
 pub mod stream_connection;
+pub mod tenor;
 pub mod token;
 pub mod unread;
 pub mod voice;

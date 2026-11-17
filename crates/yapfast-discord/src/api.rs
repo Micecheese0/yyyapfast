@@ -1472,6 +1472,16 @@ impl Api {
         self.json(self.request(Method::GET, &path)).await
     }
 
+    /// A page of Tenor's website, `path` after its address, for the picker
+    /// when Tenor is where its GIFs come from. Tenor isn't Discord: this is a
+    /// plain request, without the account's token, which only
+    /// [`Self::request`] adds.
+    pub async fn tenor_page(&self, path: &str) -> Result<String> {
+        let url = format!("{}{path}", crate::tenor::SITE);
+        let page = self.read_file(&url, 4 * 1024 * 1024).await?;
+        Ok(String::from_utf8_lossy(&page).into_owned())
+    }
+
     /// Tells the provider which GIF a search for `query` led to.
     pub async fn gif_select(&self, id: &str, query: &str) -> Result<()> {
         let body = json!({"id": id, "q": query});

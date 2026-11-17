@@ -887,6 +887,21 @@ share the window: its left edge drags it wider, and each tab fits what it shows
 to that width. Discord finds GIFs through Klipy, and Yapfast asks Discord as
 its desktop client does:
 
+- *Find GIFs on Tenor* in Settings → Messages, off until turned on, takes the
+  picker's GIFs from Tenor's website instead (`yapfast-discord/src/tenor.rs`;
+  `Action::SetTenorGifs`, and `gifs::use_tenor`, which the services read).
+  Tenor's API needs a key, so the pages are read as they are served, as the
+  BringBackTenor plugin for BetterDiscord does: `/` for the trending GIFs
+  and the home's GIF, `/explore` for its terms, `/search/{words}-gifs` for a
+  search. Each result is a `<figure class="UniversalGifListItem">` with its
+  page, `/view/…`, which a message sends and Discord shows as the GIF, and its
+  pictures; the small animated WebP is the tile. These requests go to
+  tenor.com without the account's token (`Api::tenor_page`), nothing goes
+  to Discord for them, and no search suggestions or `/gifs/select` reports
+  are made. The home isn't kept on disk, and switching drops what the picker
+  holds. Favourites are the account's own and are keyed by page, so Tenor's
+  and Klipy's mix there. Tenor can change its pages without notice, which
+  would leave the picker empty until the parser follows.
 - The home is `GET /gifs/trending?media_format=tinywebp&locale=en-US`:
   trending terms, each with a picture, and one trending GIF. It shows a
   Favorites tile, a "Trending GIFs" tile and the terms, 110px tall, two to a
