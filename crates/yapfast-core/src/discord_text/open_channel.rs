@@ -1480,7 +1480,7 @@ impl OpenChannel {
         let room = self.room.clone();
         let Some(url) = self
             .saved(item, index)
-            .or_else(|| attachment.map(|attachment| attachment.url.clone()))
+            .or_else(|| attachment.map(|attachment| attachment.url.to_string()))
         else {
             let _ = done.send(Done::Saved {
                 room,
@@ -1859,12 +1859,13 @@ impl OpenChannel {
                     spoiler: attachment.spoiler,
                     video: attachment.video_url.is_some(),
                     gif: super::gifs::favorite_gif(attachment),
-                    url: Some(saved.unwrap_or_else(|| {
-                        attachment
+                    url: Some(match saved {
+                        Some(saved) => saved.into(),
+                        None => attachment
                             .link_url
                             .clone()
-                            .unwrap_or_else(|| attachment.url.clone())
-                    })),
+                            .unwrap_or_else(|| attachment.url.clone()),
+                    }),
                     description: attachment.description.clone(),
                 }
             })
