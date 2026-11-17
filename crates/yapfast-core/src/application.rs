@@ -2303,6 +2303,8 @@ pub enum Action {
     /// Sets which of Nitro's emoji, stickers and larger files any account
     /// may use.
     SetBypass(chat::Bypass),
+    /// Sets what the message logger keeps.
+    SetLogging(chat::Logging),
     /// Sets whether the GIF picker finds GIFs on Tenor's website.
     SetTenorGifs(bool),
     /// Turns nameplates off, or on again.
@@ -4034,6 +4036,17 @@ impl Application {
                     // What the picker holds is the other provider's.
                     self.state.gifs.forget_found();
                 }
+                vec![]
+            }
+            Action::SetLogging(logging) => {
+                #[cfg(feature = "discord")]
+                yapfast_discord::logger::set(yapfast_discord::logger::Options {
+                    deleted: logging.deleted,
+                    edits: logging.edits,
+                    bots: logging.bots,
+                });
+                #[cfg(not(feature = "discord"))]
+                let _ = logging;
                 vec![]
             }
             Action::SetBypass(bypass) => {

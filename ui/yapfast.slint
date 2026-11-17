@@ -1297,6 +1297,9 @@ export component YapfastWindow inherits Window {
     in-out property <bool> clip-bypass;
     in-out property <bool> force-clip;
     in-out property <bool> tenor-gifs;
+    in-out property <bool> keep-deleted;
+    in-out property <bool> keep-edits;
+    in-out property <bool> log-bots;
     /// Whether nameplates show, in member lists and on the account's card.
     in-out property <bool> show-nameplates: true;
     /// When animations play: 0 while Yapfast has the focus, 1 always, 2 never.
@@ -4461,7 +4464,7 @@ export component YapfastWindow inherits Window {
             link-previews <=> root.link-previews; boost-gems <=> root.boost-gems; share-typing <=> root.share-typing;
             animate <=> root.animate;
             reply-ping <=> root.reply-ping-default; strip-tracking <=> root.strip-tracking;
-            free-emoji <=> root.free-emoji; free-stickers <=> root.free-stickers; clip-bypass <=> root.clip-bypass; force-clip <=> root.force-clip; tenor-gifs <=> root.tenor-gifs;
+            free-emoji <=> root.free-emoji; free-stickers <=> root.free-stickers; clip-bypass <=> root.clip-bypass; force-clip <=> root.force-clip; tenor-gifs <=> root.tenor-gifs; keep-deleted <=> root.keep-deleted; keep-edits <=> root.keep-edits; log-bots <=> root.log-bots;
             collapse-long <=> root.collapse-long;
             matrix: root.matrix-build; discord: root.discord-linked;
             preferences-changed => { root.preferences-changed(); }

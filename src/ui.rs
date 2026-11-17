@@ -1272,6 +1272,11 @@ struct Layout {
     force_clip: bool,
     /// The GIF picker finds GIFs on Tenor's website; off unless turned on.
     tenor_gifs: bool,
+    /// The message logger keeps deleted messages, earlier versions of edited
+    /// ones, and bots' messages too; each off unless turned on.
+    keep_deleted: bool,
+    keep_edits: bool,
+    log_bots: bool,
     /// Nameplates show; on unless turned off.
     nameplates: Option<bool>,
     /// Long messages fold to a few lines, with Show more; off unless turned
@@ -1487,6 +1492,15 @@ impl Layout {
         }
     }
 
+    /// What the message logger keeps, as the application takes it.
+    fn logging(&self) -> yapfast_core::chat::Logging {
+        yapfast_core::chat::Logging {
+            deleted: self.keep_deleted,
+            edits: self.keep_edits,
+            bots: self.log_bots,
+        }
+    }
+
     /// Hands the date format and the 12-hour clock to what formats times.
     fn apply_date_format(&self) {
         clock::set_date_format(self.date_format.and_then(|index| {
@@ -1676,6 +1690,9 @@ impl Layout {
         window.set_clip_bypass(self.clip_bypass);
         window.set_force_clip(self.force_clip);
         window.set_tenor_gifs(self.tenor_gifs);
+        window.set_keep_deleted(self.keep_deleted);
+        window.set_keep_edits(self.keep_edits);
+        window.set_log_bots(self.log_bots);
         window.set_show_nameplates(self.nameplates.unwrap_or(true));
         window.set_collapse_long(self.collapse_long);
         window.set_animate(choice(&ANIMATES, self.animate));
@@ -2469,6 +2486,7 @@ impl Adapter {
         app.dispatch(Action::StripTracking(layout.strip_tracking.unwrap_or(true)));
         app.dispatch(Action::SetBypass(layout.bypass()));
         app.dispatch(Action::SetTenorGifs(layout.tenor_gifs));
+        app.dispatch(Action::SetLogging(layout.logging()));
         app.dispatch(Action::HideNameplates(!layout.nameplates.unwrap_or(true)));
         app.dispatch(Action::SetPinned(layout.pinned.clone()));
         let notifier = crate::notify::Notifier::start(open_from_notification, &root);

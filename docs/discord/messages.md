@@ -983,6 +983,30 @@ its desktop client does:
   The picture downloads to disk as it comes, so a full-size GIF of tens of
   megabytes takes no memory, and the thumbnail plays from its file.
 
+## Deleted and edited messages
+
+A port of the MessageLoggerV2 plugin for BetterDiscord, in Settings →
+Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
+`Action::SetLogging`, and `logger::set`, which the channel code reads):
+
+- *Keep deleted messages*: `MESSAGE_DELETE` and `MESSAGE_DELETE_BULK` leave a
+  message the channel holds in place, marked `Message::deleted` instead of
+  removed (`change` in `discord_text/open_channel.rs`). It shows greyed with
+  *(deleted)* before its text, and a deleted message that mentioned the
+  account stays highlighted, which is what the plugin calls a ghost ping. A
+  message the account deletes itself goes as usual.
+- *Keep edit history*: an update that changes a message's content pushes what
+  it said onto `Message::history`, up to ten versions, shown quoted above it.
+- *Keep bots' messages too*: bots' and webhooks' messages are left out
+  unless this is on.
+- What's kept is what Yapfast holds: the open channels' messages and the
+  newest of those shown lately. A page of history never brings a deleted
+  message back, and `Run::fit` leaves a kept one be. These marks are in
+  the encrypted `discord-messages/` cache with the messages, so they are
+  there after a restart, within its limits. Messages of channels Yapfast
+  isn't holding aren't cached for this, to keep memory down, and the plugin's
+  log window, whitelists and ignored channels aren't ported.
+
 ## Mark Unread and message links
 
 A message's menu offers Mark Unread and Copy Message Link after Pin, and

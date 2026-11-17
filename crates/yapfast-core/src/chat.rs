@@ -445,6 +445,15 @@ pub struct Bypass {
     pub force_clips: bool,
 }
 
+/// What Discord's message logger keeps: deleted messages, earlier versions of
+/// edited ones, and whether bots' count.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Logging {
+    pub deleted: bool,
+    pub edits: bool,
+    pub bots: bool,
+}
+
 /// A file size as people read it: bytes, KB, then MB.
 pub fn file_size(bytes: u64) -> String {
     match bytes {

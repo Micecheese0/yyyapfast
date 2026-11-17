@@ -1214,6 +1214,9 @@ export component MessageSettings inherits VerticalLayout {
     in-out property <bool> clip-bypass;
     in-out property <bool> force-clip;
     in-out property <bool> tenor-gifs;
+    in-out property <bool> keep-deleted;
+    in-out property <bool> keep-edits;
+    in-out property <bool> log-bots;
     /// The networks in use, which the descriptions name.
     in property <bool> matrix;
     in property <bool> discord;
@@ -1338,6 +1341,24 @@ export component MessageSettings inherits VerticalLayout {
         text: "Find GIFs on Tenor";
         description: "The GIF picker searches Tenor's website instead of Discord's picker, which uses Klipy now. A GIF goes as its Tenor link. Yapfast asks tenor.com without your Discord login.";
         checked <=> root.tenor-gifs;
+        toggled => { root.preferences-changed(); }
+    }
+    if root.discord: SettingsSwitch {
+        text: "Keep deleted messages";
+        description: "A message someone deletes, or a purge removes, stays in the chat, greyed and marked deleted, for the messages Yapfast has loaded. It is still there after a restart. A deleted message that mentioned you stays highlighted.";
+        checked <=> root.keep-deleted;
+        toggled => { root.preferences-changed(); }
+    }
+    if root.discord: SettingsSwitch {
+        text: "Keep edit history";
+        description: "A message that is edited shows what it said before, quoted above it, up to the last 10 versions.";
+        checked <=> root.keep-edits;
+        toggled => { root.preferences-changed(); }
+    }
+    if root.discord && (root.keep-deleted || root.keep-edits): SettingsSwitch {
+        text: "Keep bots' messages too";
+        description: "Also keeps deleted and edited messages of bots and webhooks, which are left out otherwise.";
+        checked <=> root.log-bots;
         toggled => { root.preferences-changed(); }
     }
     if root.discord && root.clip-bypass: SettingsSwitch {

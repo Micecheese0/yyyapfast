@@ -110,7 +110,11 @@ impl Run {
         // Discord's history never has an answer only this account sees, so
         // one stays until it's dismissed or the app closes.
         self.messages.retain(|order, message| {
-            *order < since || *order > until || listed.contains(order) || message.ephemeral
+            *order < since
+                || *order > until
+                || listed.contains(order)
+                || message.ephemeral
+                || message.deleted
         });
     }
 
@@ -602,6 +606,8 @@ impl OpenChannel {
         if let Some(nonce) = &message.nonce {
             self.pending.retain(|pending| &pending.nonce != nonce);
         }
+        let mut message = message;
+        carry_history(self.shown.messages.get(&message.order()), &mut message);
         self.rendered.remove(&message.order());
         self.shown.messages.insert(message.order(), message);
     }
@@ -1682,7 +1688,11 @@ impl OpenChannel {
         let author = name(&message.author_id, &message.author);
         let marks = server.map(|server| &*server.marks);
         let server = server.map(|server| &*server.server);
-        let (body, mentions) = rendered(discord, server, &message.content);
+        let (body, mentions) = rendered(
+            discord,
+            server,
+            &yapfast_discord::logger::shown_content(message),
+        );
         let body = match &message.system {
             Some(system) => system_body(&author, system),
             None => body,
@@ -1820,7 +1830,7 @@ impl OpenChannel {
             timestamp,
             own,
             edited: message.edited,
-            deleted: false,
+            deleted: message.deleted,
             blocked: snapshot.blocked.contains(&message.author_id),
             mentions_me: message.names_me(me, marks),
             replies_to_me: message.replies_to(me),
@@ -1983,6 +1993,18 @@ fn clip_name(name: &str) -> String {
     format!("{stem}.mp4")
 }
 
+/// Gives `new`, a message that came again, the earlier versions of itself that
+/// `old`, which Yapfast already held, kept: Discord's history doesn't say them.
+fn carry_history(old: Option<&Message>, new: &mut Message) {
+    if let Some(old) = old
+        && new.history.is_empty()
+        && new.edited
+        && !old.history.is_empty()
+    {
+        new.history = old.history.clone();
+    }
+}
+
 /// Applies an edit, a deletion or a reaction in `channel` to the messages
 /// it changes; the snowflake of the one it changed, if any.
 fn change(messages: &mut BTreeMap<u64, Message>, channel: &str, event: &Live) -> Option<u64> {
@@ -2001,10 +2023,14 @@ fn change(messages: &mut BTreeMap<u64, Message>, channel: &str, event: &Live) ->
                 Some(poll) if !poll.counted => known.poll.take(),
                 poll => poll.clone(),
             };
+            let history = yapfast_discord::logger::history_after_edit(known, message);
+            let deleted = known.deleted;
             *known = Message {
                 reactions,
                 poll,
                 reply,
+                history,
+                deleted,
                 ..message.clone()
             };
             Some(message.order())
@@ -2025,6 +2051,14 @@ fn change(messages: &mut BTreeMap<u64, Message>, channel: &str, event: &Live) ->
             id: message,
         } if id == channel => {
             let order = message.parse().unwrap_or_default();
+            // A message the logger keeps stays, marked, where it was.
+            if let Some(kept) = messages
+                .get_mut(&order)
+                .filter(|kept| yapfast_discord::logger::keeps_deleted(kept))
+            {
+                kept.deleted = true;
+                return Some(order);
+            }
             messages.remove(&order).map(|_| order)
         }
         Live::Reaction {
