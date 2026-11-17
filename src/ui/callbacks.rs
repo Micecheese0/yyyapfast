@@ -1655,6 +1655,36 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     bind!(on_leave_post, Action::LeaveNewPost);
     bind!(on_stay_post, Action::StayInNewPost);
     {
+        let (adapter, weak) = (adapter.clone(), window.as_weak());
+        window.on_show_message_log(move |shown| {
+            if let Some(window) = weak.upgrade() {
+                adapter
+                    .borrow_mut()
+                    .action(&window, Action::ShowMessageLog(shown));
+            }
+        });
+    }
+    {
+        let (adapter, weak) = (adapter.clone(), window.as_weak());
+        window.on_log_mode_changed(move |mode| {
+            if let Some(window) = weak.upgrade() {
+                adapter
+                    .borrow_mut()
+                    .action(&window, Action::SetLogWhitelist(mode == 1));
+            }
+        });
+    }
+    {
+        let (adapter, weak) = (adapter.clone(), window.as_weak());
+        window.on_set_log_tab(move |tab| {
+            if let Some(window) = weak.upgrade() {
+                adapter
+                    .borrow_mut()
+                    .action(&window, Action::SetLogTab(tab.max(0) as usize));
+            }
+        });
+    }
+    {
         let adapter = adapter.clone();
         let weak = window.as_weak();
         window.on_show_pins(move |shown| {

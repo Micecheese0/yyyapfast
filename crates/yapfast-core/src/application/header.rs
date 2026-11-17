@@ -31,6 +31,46 @@ impl Application {
         effects
     }
 
+    /// Opens the open channel's message log window, which asks what the log
+    /// holds of it, or closes it.
+    pub(super) fn show_message_log(&mut self, shown: bool) -> Vec<Effect> {
+        self.state.message_log = None;
+        let Some(room) = self
+            .state
+            .conversation_that(|can| can.pins)
+            .filter(|room| shown && !room.forum)
+            .map(|room| room.id.clone())
+        else {
+            return vec![];
+        };
+        self.state.pins = None;
+        self.state.add_people = None;
+        let mut effects = self.close_threads();
+        self.state.message_log = Some(MessageLog {
+            room: room.clone(),
+            ..MessageLog::default()
+        });
+        effects.push(Effect::Backend(Command::Discord(
+            DiscordCommand::MessageLog { room },
+        )));
+        effects
+    }
+
+    pub(super) fn message_log_came(
+        &mut self,
+        room: String,
+        result: Result<Vec<chat::LogEntry>, String>,
+    ) {
+        if let Some(log) = self
+            .state
+            .message_log
+            .as_mut()
+            .filter(|log| log.room == room)
+        {
+            log.entries = Some(result);
+        }
+    }
+
     pub(super) fn pins_came(&mut self, room: String, result: Result<Vec<ChatMessage>, String>) {
         if let Some(pins) = self.state.pins.as_mut().filter(|pins| pins.room == room) {
             pins.messages = Some(result);

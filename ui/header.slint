@@ -277,6 +277,70 @@ export component PinsPopover inherits Rectangle {
     }
 }
 
+// The channel's message log under the header's log button: what the log holds
+// of deleted, ghost-pinged, edited and purged messages, a tab for each, with
+// the pictures it saved.
+export component LogPopover inherits Rectangle {
+    in property <[FoundRow]> entries;
+    /// Said instead of the list: while it loads, when it fails, or when the
+    /// tab has nothing.
+    in property <string> note;
+    in property <int> tab;
+    callback chose-tab(int);
+    callback open-link(string);
+    callback close;
+    property <[string]> tabs: ["Deleted", "Ghost pings", "Edited", "Mass deletions"];
+    /// How tall it would be to show every entry.
+    out property <length> fit: 49px + 44px + (root.note != "" ? 172px : list.preferred-height);
+    width: 480px;
+    Popover {
+        icon: @image-url("icons/history.svg");
+        heading: "Message log";
+        close => { root.close(); }
+        Rectangle {
+            height: 44px;
+            HorizontalLayout {
+                padding: 8px; spacing: 6px;
+                for name[index] in root.tabs: Rectangle {
+                    border-radius: 6px;
+                    background: index == root.tab ? Theme.active : tab-touch.has-hover ? Theme.hover : transparent;
+                    accessible-role: button;
+                    accessible-label: index == root.tab ? name + ", chosen" : name;
+                    accessible-action-default => { root.chose-tab(index); }
+                    Text {
+                        text: name; font-size: 13px;
+                        color: index == root.tab ? Theme.text : Theme.secondary;
+                        font-weight: index == root.tab ? 700 : 500;
+                    }
+                    tab-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => { root.chose-tab(index); }
+                    }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.edge; }
+        }
+        if root.note != "": VerticalLayout {
+            padding: 24px; spacing: 12px; alignment: center;
+            Image { source: @image-url("icons/history.svg"); height: 40px; image-fit: contain; colorize: Theme.faint; }
+            Text { text: root.note; color: Theme.muted; font-size: 14px; wrap: word-wrap; horizontal-alignment: center; }
+        }
+        // Always there, so its height can be read; empty while a note shows.
+        ScrollView {
+            vertical-stretch: root.note == "" ? 1 : 0;
+            max-height: root.note == "" ? 100000px : 0px;
+            visible: root.note == "";
+            list := VerticalLayout {
+                padding: 12px; spacing: 8px; alignment: start;
+                for entry in root.entries: FoundCard {
+                    found: entry;
+                    open-link(link) => { root.open-link(link); }
+                }
+            }
+        }
+    }
+}
+
 // A thread in a channel's list of threads, as a card: its name, then its
 // newest message, or who started an archived one, and when it was last
 // active, and on the right a few of those in it. Clicking opens it; with

@@ -176,7 +176,10 @@ interested. Folders show up as they do in Discord.
   emoji, stickers and spoilers. Three optional switches, off until you turn
   them on, use emoji and stickers from any server and send an MP4 or MOV up
   to 100 MB as a clip, without Nitro. Two more, also off, keep deleted
-  messages in the chat, marked, and what edited ones said before. Voice
+  messages in the chat, marked, and what edited ones said before, with a
+  log window of deleted, edited and purged messages and ghost pings, and a
+  MsgLogData folder that saves messages and their pictures, GIFs and videos for the servers
+  and channels you choose. Voice
   messages play, with their speed and
   volume. Bots' buttons, dropdown menus and forms work too, radio buttons,
   checkboxes and file uploads included, and so do apps' slash commands: type

@@ -1025,10 +1025,25 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   messages that stay as they were aren't read in full) and puts back the
   deleted messages and edited messages' earlier versions that fall among the
   loaded ones, so an old deleted message shows when you scroll to where it
-  was. The chat shows no picture from the folder yet: a deleted message's
-  pictures show while Discord's CDN still serves them or the picture cache
-  holds them, and the files in the folder are there to open.
-- The plugin's log window, whitelists and ignored channels aren't ported.
+  was.
+- The message log window is the clock button at the right of a channel's
+  header, beside the pins and the member list (`Action::ShowMessageLog`,
+  `LogPopover` in `ui/header.slint`, built like the pins popup). Its tabs list,
+  latest first, the channel's *Deleted* messages, *Ghost pings* (deleted
+  messages that mentioned the account or @everyone), *Edited* messages, with
+  what each said before quoted above it, and *Mass deletions*, which came in a
+  `MESSAGE_DELETE_BULK`. `DiscordCommand::MessageLog` reads the channel's file
+  (`msglog::entries`) and builds each as a pinned message is built; its first
+  pictures come from the files the log saved (`discord_text/message_log.rs`,
+  decoded where they are), or from Discord when the log has none.
+- Which servers and channels are logged is a list in `MsgLogData/rules.json`:
+  Settings → Message log chooses whether the log keeps all but the ones listed
+  or only the ones listed, and a server's or channel's context menu has *Log
+  this channel*, *Don't log this channel* or the like for its mode, which adds
+  it to the list or takes it off (`Action::ToggleLogged`,
+  `msglog::toggle_listed`). A server on the list covers its channels. As the
+  log is written at the gateway, a listed channel is logged without being
+  open.
 
 ## Mark Unread and message links
 

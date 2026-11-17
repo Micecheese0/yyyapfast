@@ -445,6 +445,20 @@ pub struct Bypass {
     pub force_clips: bool,
 }
 
+/// A message the message log holds, as its window lists it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LogEntry {
+    pub message: ChatMessage,
+    /// It was deleted.
+    pub deleted: bool,
+    /// It was edited, and `message`'s body shows what it said before.
+    pub edited: bool,
+    /// It went in a purge of many messages.
+    pub bulk: bool,
+    /// It was deleted and mentioned this account: a ghost ping.
+    pub ghost: bool,
+}
+
 /// What Discord's message logger keeps: deleted messages, earlier versions of
 /// edited ones, whether bots' count, and the `MsgLogData` folder's messages and
 /// media, with the largest file of each kind in MB, 0 for no limit.
@@ -3002,6 +3016,11 @@ pub enum DiscordCommand {
     Pins {
         room: String,
     },
+    /// What the message log holds of a Discord channel, deleted, edited or
+    /// purged; [`Event::MessageLog`] follows.
+    MessageLog {
+        room: String,
+    },
     /// A page of a Discord server channel's threads, by its room id, as its
     /// list of threads shows them: the archived ones from the `offset`th,
     /// or with a `query`, those of any kind whose name it finds.
@@ -4368,6 +4387,12 @@ pub enum Event {
     Pins {
         room: String,
         result: Result<Vec<ChatMessage>, String>,
+    },
+    /// [`DiscordCommand::MessageLog`]'s messages, the latest first, or why
+    /// they didn't come.
+    MessageLog {
+        room: String,
+        result: Result<Vec<LogEntry>, String>,
     },
     /// [`DiscordCommand::StartThread`]'s thread, by room id, in the channel
     /// `room`, or why it didn't start.

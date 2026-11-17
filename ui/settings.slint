@@ -1358,6 +1358,9 @@ export component MessageLogSettings inherits VerticalLayout {
     in-out property <bool> keep-edits;
     in-out property <bool> log-bots;
     in-out property <bool> archive;
+    /// The servers and channels the context menu lists: 0 log all but them, 1 log only them.
+    in-out property <int> log-mode;
+    callback log-mode-changed(int);
     /// The largest file of each kind: 0 5 MB, 1 25 MB, 2 100 MB, 3 500 MB, 4 no limit.
     in-out property <int> image-size: 1;
     in-out property <int> gif-size: 1;
@@ -1390,6 +1393,18 @@ export component MessageLogSettings inherits VerticalLayout {
         description: "Writes every message you get, and its pictures, GIFs and videos, to the MsgLogData folder in Yapfast's data folder, whichever channel it is in. The files are not encrypted and no login owns them: signing out or resetting your password leaves them be, and only you delete the folder.";
         checked <=> root.archive;
         toggled => { root.preferences-changed(); }
+    }
+    SettingsHeading { text: "WHICH SERVERS AND CHANNELS"; }
+    Text {
+        text: "Right-click a server or channel and choose Message log to list it.";
+        color: Theme.muted; font-size: 13px; wrap: word-wrap;
+    }
+    Choices {
+        label: "How the list works";
+        options: ["Log all but listed", "Log only listed"];
+        controlled: true;
+        current: root.log-mode;
+        chosen(index) => { root.log-mode-changed(index); }
     }
     SettingsHeading { text: "LARGEST FILE TO SAVE"; }
     Text { text: "Pictures"; color: Theme.secondary; font-size: 14px; }

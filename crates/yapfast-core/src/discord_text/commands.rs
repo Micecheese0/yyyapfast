@@ -96,6 +96,9 @@ pub fn command(
     let Some(command) = gifs::command(command, discord, events) else {
         return;
     };
+    let Some(command) = super::message_log::command(command, discord, events) else {
+        return;
+    };
     let Some(command) = super::server_settings::command(command, discord, events) else {
         return;
     };

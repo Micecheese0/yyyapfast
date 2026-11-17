@@ -52,6 +52,9 @@ static LIMITS: [AtomicU64; 3] = [
 /// Downloads going at once, so a busy channel's files come one after another.
 static TURNS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
+static WHITELIST: AtomicBool = AtomicBool::new(false);
+static LISTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// A kind of file the log keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -124,13 +127,96 @@ pub fn set(options: Options) {
 
 /// Where the log is kept: the `MsgLogData` folder.
 pub fn keep_in(root: PathBuf) {
-    *ROOT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(root);
+    let rules = std::fs::read(root.join("rules.json"))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Rules>(&data).ok())
+        .unwrap_or_default();
+    WHITELIST.store(rules.whitelist, Ordering::Relaxed);
+    *lock(&LISTED) = rules.listed;
+    *lock(&ROOT) = Some(root);
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Which servers and channels the log keeps, as `rules.json` holds them: all
+/// but the ones listed, or only the ones listed.
+#[derive(serde::Serialize, Deserialize, Default)]
+struct Rules {
+    #[serde(default)]
+    whitelist: bool,
+    /// Ids of servers and channels.
+    #[serde(default)]
+    listed: Vec<String>,
+}
+
+/// Whether the log keeps only the servers and channels listed, rather than all
+/// but those.
+pub fn whitelist() -> bool {
+    WHITELIST.load(Ordering::Relaxed)
+}
+
+/// The ids of the servers and channels listed.
+pub fn listed() -> Vec<String> {
+    lock(&LISTED).clone()
+}
+
+fn save_rules() {
+    let Some(root) = root() else {
+        return;
+    };
+    let rules = Rules {
+        whitelist: whitelist(),
+        listed: listed(),
+    };
+    let written = std::fs::create_dir_all(&root)
+        .and_then(|()| std::fs::write(root.join("rules.json"), serde_json::to_vec(&rules)?));
+    if let Err(error) = written {
+        tracing::warn!(%error, "could not write the message log's rules");
+    }
+}
+
+/// Switches between keeping all but the listed servers and channels, and only
+/// those.
+pub fn set_whitelist(on: bool) {
+    WHITELIST.store(on, Ordering::Relaxed);
+    save_rules();
+}
+
+/// Adds the server or channel `id` to the list, or takes it off when it's on;
+/// returns whether it's on the list now.
+pub fn toggle_listed(id: &str) -> bool {
+    let on = {
+        let mut listed = lock(&LISTED);
+        match listed.iter().position(|known| known == id) {
+            Some(at) => {
+                listed.remove(at);
+                false
+            }
+            None => {
+                listed.push(id.to_owned());
+                true
+            }
+        }
+    };
+    save_rules();
+    on
+}
+
+/// Whether the log keeps messages of `channel`, in `guild` if it's in one.
+pub fn wants(guild: Option<&str>, channel: &str) -> bool {
+    let listed = {
+        let listed = lock(&LISTED);
+        listed
+            .iter()
+            .any(|id| id == channel || Some(id.as_str()) == guild)
+    };
+    listed == whitelist()
 }
 
 fn root() -> Option<PathBuf> {
-    ROOT.lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
+    lock(&ROOT).clone()
 }
 
 /// Whether messages are being written.
@@ -161,9 +247,13 @@ enum Entry {
     /// A message whose words changed, as it is now.
     #[serde(rename = "e")]
     Edited { m: Message },
-    /// A message that was deleted.
+    /// A message that was deleted, in a purge when `bulk`.
     #[serde(rename = "d")]
-    Deleted { id: String },
+    Deleted {
+        id: String,
+        #[serde(default, rename = "b")]
+        bulk: bool,
+    },
 }
 
 /// What of a line tells which message it's of, without reading the rest.
@@ -213,8 +303,11 @@ fn append(channel: &str, lines: &[String]) {
 
 /// Logs a message that came, or whose words changed, and with the media
 /// switch on, downloads its files. It runs apart from the session.
-pub fn message(api: &Arc<Api>, message: Message, update: bool) {
-    if !logging() || (message.bot && !BOTS.load(Ordering::Relaxed)) {
+pub fn message(api: &Arc<Api>, guild: Option<&str>, message: Message, update: bool) {
+    if !logging()
+        || (message.bot && !BOTS.load(Ordering::Relaxed))
+        || !wants(guild, &message.channel_id)
+    {
         return;
     }
     // An update that leaves the words be, as one that adds a link's embed, is
@@ -233,16 +326,17 @@ pub fn message(api: &Arc<Api>, message: Message, update: bool) {
     });
 }
 
-/// Logs deleted messages of `channel`.
-pub fn deleted(channel: &str, ids: Vec<String>) {
-    if !logging() || ids.is_empty() {
+/// Logs deleted messages of `channel`, in `guild` if it's in one, `bulk` for
+/// a purge.
+pub fn deleted(guild: Option<&str>, channel: &str, ids: Vec<String>, bulk: bool) {
+    if !logging() || ids.is_empty() || !wants(guild, channel) {
         return;
     }
     let channel = channel.to_owned();
     tokio::spawn(async move {
         let lines: Vec<String> = ids
             .into_iter()
-            .map(|id| serde_json::json!({"t": "d", "id": id}).to_string())
+            .map(|id| serde_json::json!({"t": "d", "id": id, "b": bulk}).to_string())
             .collect();
         let _ = tokio::task::spawn_blocking(move || append(&channel, &lines)).await;
     });
@@ -344,9 +438,25 @@ async fn media(api: &Api, message: &Message) {
     }
 }
 
+/// A message the log holds as deleted, or edited with what it said before.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Logged {
+    pub message: Message,
+    /// It went in a purge.
+    pub bulk: bool,
+}
+
 /// The messages of `channel` that were deleted, and those edited with what
 /// they said before, oldest first, however many. It reads the disk.
 pub fn logged(channel: &str) -> Vec<Message> {
+    entries(channel)
+        .into_iter()
+        .map(|logged| logged.message)
+        .collect()
+}
+
+/// [`logged`], with how each went.
+pub fn entries(channel: &str) -> Vec<Logged> {
     let Some(file) = lines_file(channel) else {
         return Vec::new();
     };
@@ -371,6 +481,7 @@ pub fn logged(channel: &str) -> Vec<Message> {
         return Vec::new();
     };
     let mut messages: BTreeMap<u64, Message> = BTreeMap::new();
+    let mut purged: HashSet<u64> = HashSet::new();
     for line in second.lines().map_while(Result::ok) {
         let Ok(light) = serde_json::from_str::<Light>(&line) else {
             continue;
@@ -408,21 +519,33 @@ pub fn logged(channel: &str) -> Vec<Message> {
                     },
                 );
             }
-            Entry::Deleted { id } => {
-                if let Some(message) = id
-                    .parse::<u64>()
-                    .ok()
-                    .and_then(|order| messages.get_mut(&order))
-                {
+            Entry::Deleted { id, bulk } => {
+                let order = id.parse::<u64>().ok();
+                if let Some(message) = order.and_then(|order| messages.get_mut(&order)) {
                     message.deleted = true;
+                    if let (true, Some(order)) = (bulk, order) {
+                        purged.insert(order);
+                    }
                 }
             }
         }
     }
     messages
-        .into_values()
-        .filter(|message| message.deleted || !message.history.is_empty())
+        .into_iter()
+        .filter(|(_, message)| message.deleted || !message.history.is_empty())
+        .map(|(order, message)| Logged {
+            bulk: purged.contains(&order),
+            message,
+        })
         .collect()
+}
+
+/// Where the file of the attachment at `index` of `message` is kept, if the
+/// log has it.
+pub fn local_media(message: &Message, index: usize) -> Option<PathBuf> {
+    let attachment = message.attachments.get(index)?;
+    let file = media_file(&root()?, kind(attachment)?, message, index, &attachment.name);
+    file.is_file().then_some(file)
 }
 
 #[cfg(test)]
@@ -453,7 +576,7 @@ mod tests {
                 line("c", &said("3", "three", false)),
                 line("e", &said("2", "two!", true)),
                 line("e", &said("2", "two!!", true)),
-                serde_json::json!({"t": "d", "id": "3"}).to_string(),
+                serde_json::json!({"t": "d", "id": "3", "b": true}).to_string(),
                 serde_json::json!({"t": "d", "id": "99"}).to_string(),
             ],
         );
@@ -464,6 +587,20 @@ mod tests {
             .collect();
         assert_eq!(shown, [("2", "two!!", false, 2), ("3", "three", true, 0)]);
         assert_eq!(logged[0].history, ["two", "two!"]);
+        let entries = super::entries("7");
+        assert_eq!(entries.iter().map(|e| e.bulk).collect::<Vec<_>>(), [false, true]);
+        // Only the servers and channels the rules let through.
+        set_whitelist(false);
+        assert!(wants(Some("1"), "7"));
+        assert!(toggle_listed("7"));
+        assert!(!wants(Some("1"), "7"));
+        assert!(wants(Some("1"), "8"));
+        set_whitelist(true);
+        assert!(wants(Some("1"), "7"));
+        assert!(!wants(Some("1"), "8"));
+        assert!(wants(Some("7"), "8"));
+        assert!(!toggle_listed("7"));
+        assert!(!wants(Some("1"), "7"));
         assert!(super::logged("8").is_empty());
         assert!(super::logged("../x").is_empty());
         let _ = std::fs::remove_dir_all(&root);

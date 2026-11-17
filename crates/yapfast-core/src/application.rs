@@ -258,6 +258,35 @@ pub struct Pins {
     pub messages: Option<Result<Vec<ChatMessage>, String>>,
 }
 
+/// The message log window of a channel, while it's open.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MessageLog {
+    pub room: String,
+    /// The tab: 0 deleted, 1 ghost pings, 2 edited, 3 mass deletions.
+    pub tab: usize,
+    /// The channel's logged messages, the latest first; `None` while they're
+    /// on their way.
+    pub entries: Option<Result<Vec<chat::LogEntry>, String>>,
+}
+
+impl MessageLog {
+    /// The entries the tab shows.
+    pub fn shown(&self) -> Vec<&chat::LogEntry> {
+        let Some(Ok(entries)) = &self.entries else {
+            return Vec::new();
+        };
+        entries
+            .iter()
+            .filter(|entry| match self.tab {
+                0 => entry.deleted && !entry.bulk,
+                1 => entry.ghost,
+                2 => entry.edited,
+                _ => entry.deleted && entry.bulk,
+            })
+            .collect()
+    }
+}
+
 /// A search, while its results show: of a DM, or of a whole Discord server,
 /// which stays open while its channels do.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -729,6 +758,13 @@ pub struct AppState {
     /// The selected DM's pinned messages, a search of it, and adding friends
     /// to it, each while it's open.
     pub pins: Option<Pins>,
+    /// The open channel's message log window.
+    pub message_log: Option<MessageLog>,
+    /// The servers and channels, by id, the message log's rules list, and
+    /// whether they're the only ones it keeps rather than the only ones it
+    /// leaves out.
+    pub log_listed: Vec<String>,
+    pub log_whitelist: bool,
     pub search: Option<Search>,
     /// The open Discord channel's list of its threads.
     pub threads: Option<ThreadList>,
@@ -1865,6 +1901,19 @@ pub enum Action {
     CloseDm(String),
     /// Show the selected DM's pinned messages, or stop.
     ShowPins(bool),
+    /// Show the open channel's message log, or stop.
+    ShowMessageLog(bool),
+    /// Choose the message log window's tab: 0 deleted, 1 ghost pings, 2 edited,
+    /// 3 mass deletions.
+    SetLogTab(usize),
+    /// Reads the message log's rules, which the folder keeps.
+    LoadLogRules,
+    /// Adds the server or channel, by id, to the message log's list, or takes
+    /// it off.
+    ToggleLogged(String),
+    /// Sets whether the message log keeps only the servers and channels
+    /// listed, rather than all but those.
+    SetLogWhitelist(bool),
     /// The pointer went over a message's reaction, by item and key, or left
     /// it.
     HoverReaction(Option<(String, String)>),
@@ -3579,6 +3628,37 @@ impl Application {
             }
             Action::CloseDm(room) => self.close_dm(room),
             Action::ShowPins(shown) => self.show_pins(shown),
+            Action::ShowMessageLog(shown) => self.show_message_log(shown),
+            Action::SetLogTab(tab) => {
+                if let Some(log) = &mut self.state.message_log {
+                    log.tab = tab.min(3);
+                }
+                vec![]
+            }
+            Action::LoadLogRules => {
+                #[cfg(feature = "discord")]
+                {
+                    self.state.log_listed = yapfast_discord::msglog::listed();
+                    self.state.log_whitelist = yapfast_discord::msglog::whitelist();
+                }
+                vec![]
+            }
+            Action::ToggleLogged(id) => {
+                #[cfg(feature = "discord")]
+                {
+                    yapfast_discord::msglog::toggle_listed(&id);
+                    self.state.log_listed = yapfast_discord::msglog::listed();
+                }
+                #[cfg(not(feature = "discord"))]
+                let _ = id;
+                vec![]
+            }
+            Action::SetLogWhitelist(on) => {
+                self.state.log_whitelist = on;
+                #[cfg(feature = "discord")]
+                yapfast_discord::msglog::set_whitelist(on);
+                vec![]
+            }
             Action::HoverReaction(hovered) => self.hover_reaction(hovered),
             Action::OpenGifs => self.open_gifs(),
             Action::OpenStickers => self.open_stickers(),
@@ -4383,6 +4463,7 @@ impl Application {
             }
             Event::ThreadOpened { room, result } => self.thread_opened(room, result),
             Event::Pins { room, result } => self.pins_came(room, result),
+            Event::MessageLog { room, result } => self.message_log_came(room, result),
             Event::GifCategories(result) => self.gif_categories_came(result),
             Event::Gifs { query, result } => self.gifs_came(query, result),
             Event::GifSuggestions { query, terms } => self.gif_suggestions_came(query, terms),

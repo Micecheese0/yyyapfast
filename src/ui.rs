@@ -1879,6 +1879,10 @@ struct Models {
     /// The open DM's pinned messages, what its search found, and the
     /// friends its picker offers.
     pins: Rc<VecModel<FoundRow>>,
+    /// The open channel's message log, as its tab shows it, and what the rows
+    /// were built from: the tab, how many, and how many pictures they had.
+    message_log: Rc<VecModel<FoundRow>>,
+    message_log_built: std::cell::Cell<(i32, usize, usize)>,
     /// The open channel's list of its threads.
     thread_rows: Rc<VecModel<ThreadRow>>,
     /// The open forum's posts.
@@ -1966,6 +1970,7 @@ impl Models {
         window.set_mentions(ModelRc::from(self.mentions.clone()));
         window.set_new_dm_people(ModelRc::from(self.new_dm_people.clone()));
         window.set_pins(ModelRc::from(self.pins.clone()));
+        window.set_message_log(ModelRc::from(self.message_log.clone()));
         window.set_thread_rows(ModelRc::from(self.thread_rows.clone()));
         window.set_post_rows(ModelRc::from(self.post_rows.clone()));
         window.set_post_chosen_tags(ModelRc::from(self.post_chosen_tags.clone()));
@@ -2514,6 +2519,7 @@ impl Adapter {
         app.dispatch(Action::SetBypass(layout.bypass()));
         app.dispatch(Action::SetTenorGifs(layout.tenor_gifs));
         app.dispatch(Action::SetLogging(layout.logging()));
+        app.dispatch(Action::LoadLogRules);
         app.dispatch(Action::HideNameplates(!layout.nameplates.unwrap_or(true)));
         app.dispatch(Action::SetPinned(layout.pinned.clone()));
         let notifier = crate::notify::Notifier::start(open_from_notification, &root);

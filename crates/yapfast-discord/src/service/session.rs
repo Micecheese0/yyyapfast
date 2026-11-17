@@ -670,15 +670,19 @@ impl Session<'_> {
                 (Event::MessageCreate | Event::MessageUpdate, Some(message)) => {
                     crate::msglog::message(
                         &self.shared.api,
+                        data["guild_id"].as_str(),
                         message.clone(),
                         *event == Event::MessageUpdate,
                     );
                 }
                 (Event::MessageDelete, _) => crate::msglog::deleted(
+                    data["guild_id"].as_str(),
                     data["channel_id"].as_str().unwrap_or_default(),
                     data["id"].as_str().map(str::to_owned).into_iter().collect(),
+                    false,
                 ),
                 (Event::MessageDeleteBulk, _) => crate::msglog::deleted(
+                    data["guild_id"].as_str(),
                     data["channel_id"].as_str().unwrap_or_default(),
                     data["ids"]
                         .as_array()
@@ -686,6 +690,7 @@ impl Session<'_> {
                         .flatten()
                         .filter_map(|id| id.as_str().map(str::to_owned))
                         .collect(),
+                    true,
                 ),
                 _ => {}
             }

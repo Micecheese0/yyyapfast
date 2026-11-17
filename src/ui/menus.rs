@@ -178,6 +178,7 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
                 MenuChoice::Kick => (format!("Kick {}", name()), &icons.kick),
                 MenuChoice::Ban => (format!("Ban {}", name()), &icons.ban),
                 MenuChoice::Invite if server => ("Invite to server".into(), &icons.befriend),
+                MenuChoice::LogPlace => (log_place_text(&app.state, id, server), &icons.read),
                 MenuChoice::CreateChannel if server => ("Create channel".into(), &icons.create),
                 MenuChoice::CreateChannel if voice => {
                     ("Create voice channel".into(), &icons.create)
@@ -213,6 +214,7 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
                 | MenuChoice::HideMuted => 2,
                 MenuChoice::CopyLink
                 | MenuChoice::CopyId
+                | MenuChoice::LogPlace
                 | MenuChoice::JoinThread
                 | MenuChoice::LeaveThread
                 | MenuChoice::Invite
@@ -392,10 +394,23 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
     (rows, submenus)
 }
 
+/// What the message log's row says of the server or channel `id`: as the
+/// list works in the log's mode, to keep it, to leave it out, or to undo that.
+fn log_place_text(state: &AppState, id: &str, server: bool) -> String {
+    let place = if server { "server" } else { "channel" };
+    match (state.log_whitelist, state.log_place_listed(id)) {
+        (true, false) => format!("Log this {place}"),
+        (true, true) => format!("Stop logging this {place}"),
+        (false, false) => format!("Don't log this {place}"),
+        (false, true) => format!("Log this {place} again"),
+    }
+}
+
 /// What a menu row says for a choice, and its icon.
 fn label(icons: &Icons, choice: MenuChoice, in_call: bool) -> (&'static str, &slint::Image) {
     match choice {
         MenuChoice::MarkRead => ("Mark as read", &icons.read),
+        MenuChoice::LogPlace => ("Message log", &icons.read),
         MenuChoice::JoinVoice => ("Join voice", &icons.call),
         MenuChoice::OpenChat => ("Open chat", &icons.chat),
         MenuChoice::Profile => ("Profile", &icons.profile),
@@ -1022,6 +1037,11 @@ pub(super) fn choose(
     };
     let action = match choice {
         MenuChoice::MarkRead => Some(Action::MarkRead(target)),
+        MenuChoice::LogPlace => adapter
+            .app
+            .state
+            .log_place_id(&target)
+            .map(Action::ToggleLogged),
         MenuChoice::JoinVoice => Some(Action::RequestJoinVoice(target)),
         MenuChoice::OpenChat => Some(Action::OpenChat(target)),
         MenuChoice::Call if person => ask(PersonAsk::Call),
@@ -1222,7 +1242,8 @@ pub(super) fn server_change(
     }
 }
 
-const CHOICES: [MenuChoice; 66] = [
+const CHOICES: [MenuChoice; 67] = [
+    MenuChoice::LogPlace,
     MenuChoice::MarkRead,
     MenuChoice::JoinVoice,
     MenuChoice::OpenChat,
@@ -1293,6 +1314,7 @@ const CHOICES: [MenuChoice; 66] = [
 
 fn choice_id(choice: MenuChoice) -> &'static str {
     match choice {
+        MenuChoice::LogPlace => "log-place",
         MenuChoice::MarkRead => "mark-read",
         MenuChoice::JoinVoice => "join-voice",
         MenuChoice::OpenChat => "open-chat",

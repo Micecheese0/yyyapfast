@@ -90,7 +90,11 @@ pub(super) fn found(
         .unwrap_or_else(|| message.author.clone());
     let ordinary = message.system.is_none();
     let timestamp = message.timestamp();
-    let (body, mentions) = rendered(discord, server, &message.content);
+    let (body, mentions) = rendered(
+        discord,
+        server,
+        &yapfast_discord::logger::shown_content(message),
+    );
     let body = match &message.system {
         Some(system) => system_body(&author, system),
         None => body,
@@ -115,6 +119,7 @@ pub(super) fn found(
         time: crate::clock::time(timestamp),
         timestamp,
         edited: message.edited,
+        deleted: message.deleted,
         attachments: message
             .attachments
             .iter()

@@ -2296,6 +2296,55 @@ impl Adapter {
         };
         show_found(&self.models.pins, pinned, twelve_hour);
 
+        // The channel's message log: its tab's entries, with the pictures the
+        // log saved. The rows are built again when the tab, the entries or
+        // their pictures change, since a kept row doesn't take a picture.
+        window.set_can_message_log(
+            state
+                .conversation_that(|can| can.pins)
+                .is_some_and(|room| !room.forum && discord::parse_room(&room.id).is_some()),
+        );
+        let log = state
+            .message_log
+            .as_ref()
+            .filter(|log| Some(log.room.as_str()) == selected);
+        window.set_message_log_open(log.is_some());
+        window.set_log_mode(i32::from(state.log_whitelist));
+        let shown: Vec<ChatMessage> = log
+            .map(|log| log.shown().into_iter().map(|entry| entry.message.clone()).collect())
+            .unwrap_or_default();
+        let tab = log.map_or(0, |log| log.tab);
+        window.set_message_log_tab(tab as i32);
+        window.set_message_log_note(
+            match log.map(|log| &log.entries) {
+                Some(None) => "Loading the message log...",
+                Some(Some(Err(error))) => error.as_str(),
+                Some(Some(Ok(_))) if shown.is_empty() => match tab {
+                    0 => "No deleted messages are logged for this channel.",
+                    1 => "No ghost pings are logged for this channel.",
+                    2 => "No edited messages are logged for this channel.",
+                    _ => "No mass deletions are logged for this channel.",
+                },
+                _ => "",
+            }
+            .into(),
+        );
+        let pictures: usize = shown
+            .iter()
+            .map(|message| {
+                message
+                    .attachments
+                    .iter()
+                    .filter(|attachment| attachment.preview.is_some())
+                    .count()
+            })
+            .sum();
+        let built = (tab as i32, shown.len(), pictures);
+        if self.models.message_log_built.replace(built) != built {
+            self.models.message_log.set_vec(Vec::new());
+        }
+        show_found(&self.models.message_log, &shown, twelve_hour);
+
         let search = state.search_shown();
         let server = search.is_some_and(|search| discord::parse_server(&search.place).is_some());
         // The box names where it looks: the DM, or the channel's server.
