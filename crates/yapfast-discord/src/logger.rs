@@ -85,10 +85,10 @@ pub fn history_after_edit(old: &Message, new: &Message) -> Vec<String> {
     history
 }
 
-/// `message` as it shows: its earlier versions quoted above it, and a deleted
-/// one marked.
+/// `message` as it shows: its earlier versions quoted above it. A deleted one
+/// shows its words as they were, which the timeline tints.
 pub fn shown_content(message: &Message) -> std::borrow::Cow<'_, str> {
-    if message.history.is_empty() && !message.deleted {
+    if message.history.is_empty() {
         return std::borrow::Cow::Borrowed(&message.content);
     }
     let mut shown = String::new();
@@ -98,9 +98,6 @@ pub fn shown_content(message: &Message) -> std::borrow::Cow<'_, str> {
             shown.push_str(line);
             shown.push('\n');
         }
-    }
-    if message.deleted {
-        shown.push_str("*(deleted)* ");
     }
     shown.push_str(&message.content);
     std::borrow::Cow::Owned(shown)
@@ -150,14 +147,17 @@ mod tests {
     }
 
     #[test]
-    fn shows_the_earlier_versions_quoted_and_a_deletion_marked() {
+    fn shows_the_earlier_versions_quoted() {
         let mut message = said("final");
         assert_eq!(shown_content(&message), "final");
         message.history = vec!["first\nline".into(), "second".into()];
         message.deleted = true;
         assert_eq!(
             shown_content(&message),
-            "> first\n> line\n> second\n*(deleted)* final"
+            "> first
+> line
+> second
+final"
         );
     }
 }

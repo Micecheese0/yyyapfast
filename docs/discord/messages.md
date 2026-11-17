@@ -991,8 +991,8 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
 
 - *Keep deleted messages*: `MESSAGE_DELETE` and `MESSAGE_DELETE_BULK` leave a
   message the channel holds in place, marked `Message::deleted` instead of
-  removed (`change` in `discord_text/open_channel.rs`). It shows greyed with
-  *(deleted)* before its text, and a deleted message that mentioned the
+  removed (`change` in `discord_text/open_channel.rs`). It shows with its
+  text in a light red tint, and a deleted message that mentioned the
   account stays highlighted, which is what the plugin calls a ghost ping. A
   message the account deletes itself goes as usual.
 - *Keep edit history*: an update that changes a message's content pushes what
