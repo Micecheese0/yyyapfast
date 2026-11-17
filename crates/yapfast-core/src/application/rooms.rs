@@ -50,6 +50,8 @@ pub enum MenuChoice {
     /// Adds a Discord server or channel to the message log's list of those it
     /// keeps, or leaves out, or takes it off; see `Action::ToggleLogged`.
     LogPlace,
+    /// Open the message log of every channel of a Discord server.
+    OpenServerLog,
     /// Copy a link to it that its network's apps open.
     CopyLink,
     /// Copy its id as its network knows it.

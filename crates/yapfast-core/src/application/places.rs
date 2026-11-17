@@ -216,6 +216,7 @@ impl Application {
         // Whether the message log keeps it, by the list in the log's settings.
         if self.state.can_log_places() {
             choices.push(MenuChoice::LogPlace);
+            choices.push(MenuChoice::OpenServerLog);
         }
         choices.extend([MenuChoice::CopyLink, MenuChoice::CopyId]);
         choices

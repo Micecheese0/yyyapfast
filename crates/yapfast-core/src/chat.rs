@@ -449,6 +449,8 @@ pub struct Bypass {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LogEntry {
     pub message: ChatMessage,
+    /// The channel's name in a server's list; empty in one channel's.
+    pub channel: String,
     /// It was deleted.
     pub deleted: bool,
     /// It was edited, and `message`'s body shows what it said before.
@@ -3020,6 +3022,11 @@ pub enum DiscordCommand {
     /// purged; [`Event::MessageLog`] follows.
     MessageLog {
         room: String,
+    },
+    /// What the message log holds of every channel of a Discord server, by its
+    /// id; [`Event::MessageLog`] follows, with the server's id as its room.
+    ServerLog {
+        server: String,
     },
     /// A page of a Discord server channel's threads, by its room id, as its
     /// list of threads shows them: the archived ones from the `offset`th,

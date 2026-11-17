@@ -1676,6 +1676,14 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
     }
     {
         let (adapter, weak) = (adapter.clone(), window.as_weak());
+        window.on_toggle_log_order(move || {
+            if let Some(window) = weak.upgrade() {
+                adapter.borrow_mut().action(&window, Action::ToggleLogOrder);
+            }
+        });
+    }
+    {
+        let (adapter, weak) = (adapter.clone(), window.as_weak());
         window.on_set_log_tab(move |tab| {
             if let Some(window) = weak.upgrade() {
                 adapter

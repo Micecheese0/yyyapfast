@@ -1,8 +1,18 @@
 //! The message log window's list: what the `MsgLogData` folder holds of a
-//! channel as deleted, edited or purged, each with the pictures it saved.
+//! channel, or of every channel of a server, as deleted, edited or purged,
+//! each with the pictures it saved.
 
 use super::{commands::NOT_DISCORD, render::found_in, *};
 use crate::chat::LogEntry;
+
+/// One channel's part of a list.
+struct Part {
+    /// The channel's name, for a server's list; empty for one channel's.
+    name: String,
+    entries: Vec<yapfast_discord::msglog::Logged>,
+    messages: Vec<Message>,
+    found: Vec<ChatMessage>,
+}
 
 /// Carries out a message log command, or gives back any other.
 pub(super) fn command(
@@ -10,69 +20,121 @@ pub(super) fn command(
     discord: Result<&Discord, &str>,
     events: &UnboundedSender<Event>,
 ) -> Option<Command> {
-    let Command::Discord(DiscordCommand::MessageLog { room }) = command else {
-        return Some(command);
+    // One channel's log, by its room id; or a server's, by its id, which
+    // lists its channels' with their names.
+    let (key, places) = match command {
+        Command::Discord(DiscordCommand::MessageLog { room }) => {
+            let place = discord::parse_room(&room)
+                .map(|(guild, channel)| (guild.to_owned(), channel.to_owned()));
+            let places = place.map(|(guild, channel)| vec![(guild, channel, String::new())]);
+            (room, places)
+        }
+        Command::Discord(DiscordCommand::ServerLog { server }) => {
+            let places = match (&discord, discord::parse_server(&server)) {
+                (Ok(discord), Some(guild)) => {
+                    let snapshot = discord.snapshots().borrow().clone();
+                    snapshot
+                        .servers
+                        .iter()
+                        .find(|known| known.id == guild)
+                        .map(|known| {
+                            known
+                                .server
+                                .text_channels
+                                .iter()
+                                .chain(&known.server.voice_channels)
+                                .map(|channel| {
+                                    (guild.to_owned(), channel.id.clone(), channel.name.clone())
+                                })
+                                .collect()
+                        })
+                }
+                _ => None,
+            };
+            (server, places)
+        }
+        other => return Some(other),
     };
-    let place =
-        discord::parse_room(&room).map(|(guild, channel)| (guild.to_owned(), channel.to_owned()));
-    match (discord, place) {
-        (Ok(discord), Some((_, channel))) => {
+    match (discord, places) {
+        (Ok(discord), Some(places)) => {
             let (discord, events) = (discord.clone(), events.clone());
             tokio::spawn(async move {
-                let entries = tokio::task::spawn_blocking(move || {
-                    yapfast_discord::msglog::entries(&channel)
-                })
-                .await
-                .unwrap_or_default();
                 let me = discord
                     .snapshots()
                     .borrow()
                     .user_id
                     .clone()
                     .unwrap_or_default();
-                let messages: Vec<Message> = entries
-                    .iter()
-                    .map(|logged| logged.message.clone())
-                    .collect();
-                // The list shows at once, its pictures as they come.
-                let mut found = found_in(&discord, &room, &messages);
-                let list = |found: &[ChatMessage]| -> Vec<LogEntry> {
-                    // The latest first.
-                    entries
+                let mut parts = Vec::new();
+                for (guild, channel, name) in places {
+                    let id = channel.clone();
+                    let entries = tokio::task::spawn_blocking(move || {
+                        yapfast_discord::msglog::entries(&id)
+                    })
+                    .await
+                    .unwrap_or_default();
+                    if entries.is_empty() {
+                        continue;
+                    }
+                    let messages: Vec<Message> = entries
                         .iter()
-                        .zip(found)
-                        .rev()
-                        .map(|(logged, message)| LogEntry {
-                            message: message.clone(),
-                            deleted: logged.message.deleted,
-                            edited: !logged.message.history.is_empty(),
-                            bulk: logged.bulk,
-                            ghost: logged.message.deleted
-                                && !me.is_empty()
-                                && (logged.message.mentions.contains(&me)
-                                    || logged.message.mention_everyone),
-                        })
-                        .collect()
-                };
+                        .map(|logged| logged.message.clone())
+                        .collect();
+                    let found = found_in(&discord, &discord::room_id(&guild, &channel), &messages);
+                    parts.push(Part {
+                        name,
+                        entries,
+                        messages,
+                        found,
+                    });
+                }
+                // The list shows at once, its pictures as they come. The
+                // window orders it, so it goes channel by channel.
                 let _ = events.send(Event::MessageLog {
-                    room: room.clone(),
-                    result: Ok(list(&found)),
+                    room: key.clone(),
+                    result: Ok(list(&parts, &me)),
                 });
-                saved_pictures(&discord, &messages, &mut found).await;
+                for part in &mut parts {
+                    saved_pictures(&discord, &part.messages, &mut part.found).await;
+                }
                 let _ = events.send(Event::MessageLog {
-                    room,
-                    result: Ok(list(&found)),
+                    room: key,
+                    result: Ok(list(&parts, &me)),
                 });
             });
         }
         (discord, _) => {
             let _ = events.send(Event::MessageLog {
-                room,
+                room: key,
                 result: Err(discord.err().unwrap_or(NOT_DISCORD).into()),
             });
         }
     }
     None
+}
+
+/// The entries of every part, each channel's latest first.
+fn list(parts: &[Part], me: &str) -> Vec<LogEntry> {
+    parts
+        .iter()
+        .flat_map(|part| {
+            part.entries
+                .iter()
+                .zip(&part.found)
+                .rev()
+                .map(|(logged, message)| LogEntry {
+                    message: message.clone(),
+                    channel: part.name.clone(),
+                    deleted: logged.message.deleted,
+                    edited: !logged.message.history.is_empty(),
+                    bulk: logged.bulk,
+                    ghost: logged.message.deleted
+                        && !me.is_empty()
+                        && (logged.message.mentions.iter().any(|id| id == me)
+                            || logged.message.mention_everyone),
+                })
+        })
+        .collect()
 }
 
 /// Gives `found` the first pictures of each message: from the file the log

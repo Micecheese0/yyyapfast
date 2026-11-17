@@ -1036,6 +1036,14 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   (`msglog::entries`) and builds each as a pinned message is built; its first
   pictures come from the files the log saved (`discord_text/message_log.rs`,
   decoded where they are), or from Discord when the log has none.
+- The window lists the newest first, and a click on *Newest first* under its
+  tabs swaps it to the oldest first (`Action::ToggleLogOrder`,
+  `MessageLog::shown` sorts by the message's time). A server's menu has *Open
+  logs for server*, above *Copy link*, which opens the same window for every
+  channel of the server (`DiscordCommand::ServerLog`, which reads the files of
+  the channels the snapshot lists, so a channel Discord no longer lists, or an
+  archived thread, isn't in it). A channel's name goes above each message
+  whenever the list holds messages of more than one channel.
 - Which servers and channels are logged is a list in `MsgLogData/rules.json`:
   Settings → Message Logger chooses whether the log keeps all but the ones listed
   or only the ones listed, and a server's or channel's context menu has *Log

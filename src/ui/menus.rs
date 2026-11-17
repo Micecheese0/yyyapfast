@@ -215,6 +215,7 @@ pub(super) fn menu(adapter: &Adapter, id: &str, person: bool) -> Menu {
                 MenuChoice::CopyLink
                 | MenuChoice::CopyId
                 | MenuChoice::LogPlace
+                | MenuChoice::OpenServerLog
                 | MenuChoice::JoinThread
                 | MenuChoice::LeaveThread
                 | MenuChoice::Invite
@@ -411,6 +412,7 @@ fn label(icons: &Icons, choice: MenuChoice, in_call: bool) -> (&'static str, &sl
     match choice {
         MenuChoice::MarkRead => ("Mark as read", &icons.read),
         MenuChoice::LogPlace => ("Message log", &icons.read),
+        MenuChoice::OpenServerLog => ("Open logs for server", &icons.read),
         MenuChoice::JoinVoice => ("Join voice", &icons.call),
         MenuChoice::OpenChat => ("Open chat", &icons.chat),
         MenuChoice::Profile => ("Profile", &icons.profile),
@@ -1037,6 +1039,7 @@ pub(super) fn choose(
     };
     let action = match choice {
         MenuChoice::MarkRead => Some(Action::MarkRead(target)),
+        MenuChoice::OpenServerLog => Some(Action::OpenServerLog(target)),
         MenuChoice::LogPlace => adapter
             .app
             .state
@@ -1242,7 +1245,8 @@ pub(super) fn server_change(
     }
 }
 
-const CHOICES: [MenuChoice; 67] = [
+const CHOICES: [MenuChoice; 68] = [
+    MenuChoice::OpenServerLog,
     MenuChoice::LogPlace,
     MenuChoice::MarkRead,
     MenuChoice::JoinVoice,
@@ -1315,6 +1319,7 @@ const CHOICES: [MenuChoice; 67] = [
 fn choice_id(choice: MenuChoice) -> &'static str {
     match choice {
         MenuChoice::LogPlace => "log-place",
+        MenuChoice::OpenServerLog => "open-server-log",
         MenuChoice::MarkRead => "mark-read",
         MenuChoice::JoinVoice => "join-voice",
         MenuChoice::OpenChat => "open-chat",

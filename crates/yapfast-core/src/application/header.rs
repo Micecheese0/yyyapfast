@@ -56,6 +56,25 @@ impl Application {
         effects
     }
 
+    /// Opens the message log of every channel of a Discord server.
+    pub(super) fn open_server_log(&mut self, server: String) -> Vec<Effect> {
+        if discord::parse_server(&server).is_none() {
+            return vec![];
+        }
+        self.state.pins = None;
+        self.state.add_people = None;
+        let mut effects = self.close_threads();
+        self.state.message_log = Some(MessageLog {
+            room: server.clone(),
+            server: true,
+            ..MessageLog::default()
+        });
+        effects.push(Effect::Backend(Command::Discord(
+            DiscordCommand::ServerLog { server },
+        )));
+        effects
+    }
+
     pub(super) fn message_log_came(
         &mut self,
         room: String,

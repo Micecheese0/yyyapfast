@@ -2307,12 +2307,29 @@ impl Adapter {
         let log = state
             .message_log
             .as_ref()
-            .filter(|log| Some(log.room.as_str()) == selected);
+            .filter(|log| log.server || Some(log.room.as_str()) == selected);
         window.set_message_log_open(log.is_some());
+        window.set_message_log_server(log.is_some_and(|log| log.server));
+        window.set_message_log_oldest_first(log.is_some_and(|log| log.oldest_first));
+        window.set_message_log_title(
+            if log.is_some_and(|log| log.server) {
+                "Server message log"
+            } else {
+                "Message log"
+            }
+            .into(),
+        );
         window.set_log_mode(i32::from(state.log_whitelist));
-        let shown: Vec<ChatMessage> = log
-            .map(|log| log.shown().into_iter().map(|entry| entry.message.clone()).collect())
-            .unwrap_or_default();
+        let entries = log.map(|log| log.shown()).unwrap_or_default();
+        let shown: Vec<ChatMessage> = entries.iter().map(|entry| entry.message.clone()).collect();
+        // A channel's name goes over its messages when the list holds those of
+        // more than one.
+        let named = entries
+            .iter()
+            .map(|entry| entry.channel.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            > 1;
         let tab = log.map_or(0, |log| log.tab);
         window.set_message_log_tab(tab as i32);
         window.set_message_log_note(
@@ -2339,11 +2356,29 @@ impl Adapter {
                     .count()
             })
             .sum();
-        let built = (tab as i32, shown.len(), pictures);
+        let order = log.is_some_and(|log| log.oldest_first);
+        let built = (
+            tab as i32 + 8 * i32::from(order) + 16 * i32::from(named),
+            shown.len(),
+            pictures,
+        );
         if self.models.message_log_built.replace(built) != built {
             self.models.message_log.set_vec(Vec::new());
         }
         show_found(&self.models.message_log, &shown, twelve_hour);
+        for (at, entry) in entries.iter().enumerate() {
+            let want = if named && !entry.channel.is_empty() {
+                format!("#{}", entry.channel)
+            } else {
+                String::new()
+            };
+            if let Some(mut row) = self.models.message_log.row_data(at)
+                && row.heading.as_str() != want
+            {
+                row.heading = want.into();
+                self.models.message_log.set_row_data(at, row);
+            }
+        }
 
         let search = state.search_shown();
         let server = search.is_some_and(|search| discord::parse_server(&search.place).is_some());

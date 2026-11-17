@@ -261,7 +261,12 @@ pub struct Pins {
 /// The message log window of a channel, while it's open.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MessageLog {
+    /// The channel's room id, or for a server's log the server's id.
     pub room: String,
+    /// It lists a whole server's channels, and shows wherever it was opened.
+    pub server: bool,
+    /// The oldest first, rather than the newest.
+    pub oldest_first: bool,
     /// The tab: 0 deleted, 1 ghost pings, 2 edited, 3 mass deletions.
     pub tab: usize,
     /// The channel's logged messages, the latest first; `None` while they're
@@ -275,7 +280,7 @@ impl MessageLog {
         let Some(Ok(entries)) = &self.entries else {
             return Vec::new();
         };
-        entries
+        let mut shown: Vec<&chat::LogEntry> = entries
             .iter()
             .filter(|entry| match self.tab {
                 0 => entry.deleted && !entry.bulk,
@@ -283,7 +288,14 @@ impl MessageLog {
                 2 => entry.edited,
                 _ => entry.deleted && entry.bulk,
             })
-            .collect()
+            .collect();
+        // A stable sort, so a purge's messages keep the order they came in.
+        if self.oldest_first {
+            shown.sort_by_key(|entry| entry.message.timestamp);
+        } else {
+            shown.sort_by_key(|entry| std::cmp::Reverse(entry.message.timestamp));
+        }
+        shown
     }
 }
 
@@ -1906,6 +1918,10 @@ pub enum Action {
     /// Choose the message log window's tab: 0 deleted, 1 ghost pings, 2 edited,
     /// 3 mass deletions.
     SetLogTab(usize),
+    /// Show the message log of every channel of a Discord server, by its id.
+    OpenServerLog(String),
+    /// Swap the message log window between the newest first and the oldest.
+    ToggleLogOrder,
     /// Reads the message log's rules, which the folder keeps.
     LoadLogRules,
     /// Adds the server or channel, by id, to the message log's list, or takes
@@ -3632,6 +3648,13 @@ impl Application {
             Action::SetLogTab(tab) => {
                 if let Some(log) = &mut self.state.message_log {
                     log.tab = tab.min(3);
+                }
+                vec![]
+            }
+            Action::OpenServerLog(server) => self.open_server_log(server),
+            Action::ToggleLogOrder => {
+                if let Some(log) = &mut self.state.message_log {
+                    log.oldest_first = !log.oldest_first;
                 }
                 vec![]
             }

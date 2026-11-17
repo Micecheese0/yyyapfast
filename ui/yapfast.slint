@@ -1105,8 +1105,13 @@ export component YapfastWindow inherits Window {
     in property <[FoundRow]> message-log;
     in property <string> message-log-note;
     in property <int> message-log-tab;
+    /// It is a server's, which opens by the rail and not under the button.
+    in property <bool> message-log-server;
+    in property <string> message-log-title: "Message log";
+    in property <bool> message-log-oldest-first;
     callback show-message-log(bool);
     callback set-log-tab(int);
+    callback toggle-log-order;
     /// The header's pin button's bottom right corner, under which the pins open.
     property <length> pins-anchor-x;
     property <length> pins-anchor-y;
@@ -4651,10 +4656,12 @@ export component YapfastWindow inherits Window {
         }
         LogPopover {
             opacity: Popup.opacity(log-motion.amount); transform-scale: Popup.scale(log-motion.amount);
-            x: max(8px, min(root.width - self.width - 8px, root.popover-x - self.width));
-            y: root.popover-y + 6px;
+            x: root.message-log-server ? 88px : max(8px, min(root.width - self.width - 8px, root.popover-x - self.width));
+            y: root.message-log-server ? 56px : root.popover-y + 6px;
             height: min(self.fit, 640px, root.height - self.y - 16px);
             entries: root.message-log; note: root.message-log-note; tab: root.message-log-tab;
+            title: root.message-log-title; oldest-first: root.message-log-oldest-first;
+            toggle-order => { root.toggle-log-order(); }
             chose-tab(tab) => { root.set-log-tab(tab); }
             open-link(link) => { root.open-link(link); }
             close => { root.show-message-log(false); }

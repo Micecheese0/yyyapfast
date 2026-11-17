@@ -286,16 +286,20 @@ export component LogPopover inherits Rectangle {
     /// tab has nothing.
     in property <string> note;
     in property <int> tab;
+    in property <string> title: "Message log";
+    /// The oldest entry first, rather than the newest.
+    in property <bool> oldest-first;
     callback chose-tab(int);
+    callback toggle-order;
     callback open-link(string);
     callback close;
     property <[string]> tabs: ["Deleted", "Ghost pings", "Edited", "Mass deletions"];
     /// How tall it would be to show every entry.
-    out property <length> fit: 49px + 44px + (root.note != "" ? 172px : list.preferred-height);
+    out property <length> fit: 49px + 44px + 32px + (root.note != "" ? 172px : list.preferred-height);
     width: 480px;
     Popover {
         icon: @image-url("icons/history.svg");
-        heading: "Message log";
+        heading: root.title;
         close => { root.close(); }
         Rectangle {
             height: 44px;
@@ -320,6 +324,28 @@ export component LogPopover inherits Rectangle {
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.edge; }
         }
+        // The order of the list, swapped by a click.
+        Rectangle {
+            height: 32px;
+            HorizontalLayout {
+                padding-right: 12px; alignment: end;
+                Rectangle {
+                    width: order-text.preferred-width + 20px; border-radius: 6px;
+                    background: order-touch.has-hover ? Theme.hover : transparent;
+                    accessible-role: button;
+                    accessible-label: root.oldest-first ? "Oldest first, show the newest first" : "Newest first, show the oldest first";
+                    accessible-action-default => { root.toggle-order(); }
+                    order-text := Text {
+                        text: root.oldest-first ? "Oldest first \u{21C5}" : "Newest first \u{21C5}";
+                        color: Theme.secondary; font-size: 13px; vertical-alignment: center;
+                    }
+                    order-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => { root.toggle-order(); }
+                    }
+                }
+            }
+        }
         if root.note != "": VerticalLayout {
             padding: 24px; spacing: 12px; alignment: center;
             Image { source: @image-url("icons/history.svg"); height: 40px; image-fit: contain; colorize: Theme.faint; }
@@ -332,9 +358,17 @@ export component LogPopover inherits Rectangle {
             visible: root.note == "";
             list := VerticalLayout {
                 padding: 12px; spacing: 8px; alignment: start;
-                for entry in root.entries: FoundCard {
-                    found: entry;
-                    open-link(link) => { root.open-link(link); }
+                for entry in root.entries: VerticalLayout {
+                    spacing: 4px;
+                    // The channel, when the list has messages of more than one.
+                    if entry.heading != "": Text {
+                        text: entry.heading; color: Theme.secondary; font-size: 13px; font-weight: 700;
+                        overflow: elide;
+                    }
+                    FoundCard {
+                        found: entry;
+                        open-link(link) => { root.open-link(link); }
+                    }
                 }
             }
         }
