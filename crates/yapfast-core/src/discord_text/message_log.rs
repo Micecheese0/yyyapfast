@@ -10,6 +10,8 @@ struct Part {
     /// What heads the channel's messages, for a list of more than one
     /// channel's; empty for one channel's.
     name: String,
+    /// The channel's room id, if it still exists to jump to.
+    room: String,
     entries: Vec<yapfast_discord::msglog::Logged>,
     messages: Vec<Message>,
     found: Vec<ChatMessage>,
@@ -39,14 +41,15 @@ pub(super) fn command(
         Command::Discord(DiscordCommand::MessageLog { room, most }) => {
             let place = discord::parse_room(&room)
                 .map(|(guild, channel)| (guild.to_owned(), channel.to_owned()));
-            let places = place.map(|(guild, channel)| vec![(guild, channel, String::new())]);
+            let places =
+                place.map(|(guild, channel)| vec![(guild, channel, String::new(), true)]);
             (room, places, most)
         }
         Command::Discord(DiscordCommand::ServerLog { server, most }) => {
             let places = match (&discord, discord::parse_server(&server)) {
                 (Ok(discord), Some(guild)) => {
                     let snapshot = discord.snapshots().borrow().clone();
-                    let mut places: Vec<(String, String, String)> = snapshot
+                    let mut places: Vec<(String, String, String, bool)> = snapshot
                         .servers
                         .iter()
                         .find(|known| known.id == guild)
@@ -62,6 +65,7 @@ pub(super) fn command(
                                         guild.to_owned(),
                                         channel.id.clone(),
                                         heading("", &channel.name, &channel.id),
+                                        true,
                                     )
                                 })
                                 .collect()
@@ -69,9 +73,9 @@ pub(super) fn command(
                         .unwrap_or_default();
                     // Channels the server lost, which no list of its has.
                     for place in yapfast_discord::msglog::places_of(guild) {
-                        if !places.iter().any(|(_, id, _)| *id == place.channel) {
+                        if !places.iter().any(|(_, id, _, _)| *id == place.channel) {
                             let label = heading("", &place.name, &place.channel);
-                            places.push((place.guild, place.channel, label));
+                            places.push((place.guild, place.channel, label, false));
                         }
                     }
                     Some(places)
@@ -86,7 +90,7 @@ pub(super) fn command(
                     .into_iter()
                     .map(|place| {
                         let label = heading(&place.guild_name, &place.name, &place.channel);
-                        (place.guild, place.channel, label)
+                        (place.guild, place.channel, label, false)
                     })
                     .collect()
             });
@@ -106,7 +110,7 @@ pub(super) fn command(
                     .unwrap_or_default();
                 let mut parts = Vec::new();
                 let mut more = false;
-                for (guild, channel, name) in places {
+                for (guild, channel, name, exists) in places {
                     let id = channel.clone();
                     // One more than `most`, to tell whether there are more.
                     let mut entries = tokio::task::spawn_blocking(move || {
@@ -125,9 +129,11 @@ pub(super) fn command(
                         .iter()
                         .map(|logged| logged.message.clone())
                         .collect();
-                    let found = found_in(&discord, &discord::room_id(&guild, &channel), &messages);
+                    let room = discord::room_id(&guild, &channel);
+                    let found = found_in(&discord, &room, &messages);
                     parts.push(Part {
                         name,
+                        room: if exists { room } else { String::new() },
                         entries,
                         messages,
                         found,
@@ -177,6 +183,7 @@ fn list(parts: &[Part], me: &str) -> Vec<LogEntry> {
                     edited: !logged.message.history.is_empty(),
                     bulk: logged.bulk,
                     media: logged.media,
+                    room: part.room.clone(),
                     ghost: logged.message.deleted
                         && !me.is_empty()
                         && (logged.message.mentions.iter().any(|id| id == me)

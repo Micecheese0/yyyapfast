@@ -2382,9 +2382,10 @@ impl Adapter {
         for (at, entry) in entries.iter().enumerate() {
             let want = if named { entry.channel.as_str() } else { "" };
             if let Some(mut row) = self.models.message_log.row_data(at)
-                && row.heading.as_str() != want
+                && (row.heading.as_str() != want || row.room.as_str() != entry.room)
             {
                 row.heading = want.into();
+                row.room = entry.room.as_str().into();
                 self.models.message_log.set_row_data(at, row);
             }
         }

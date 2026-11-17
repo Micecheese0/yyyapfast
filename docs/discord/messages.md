@@ -1047,6 +1047,12 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   (`msglog::entries`) and builds each as a pinned message is built; its first
   pictures come from the files the log saved (`discord_text/message_log.rs`,
   decoded where they are), or from Discord when the log has none.
+- A click on an entry, or its *Jump* button, closes the window and shows the
+  message in its channel (`Action::JumpInRoom`, with `LogEntry::room`). A
+  deleted message comes back in place where the channel loads around it, as
+  `restore_logged` puts back the ones among the loaded messages, so it needs
+  *Keep deleted messages* on. An entry of a channel that was deleted has no
+  room, so no button.
 - The window lists the newest first, and a click on *Newest first* under its
   tabs swaps it to the oldest first (`Action::ToggleLogOrder`,
   `MessageLog::shown` sorts by the message's time). A server's menu has *Open
