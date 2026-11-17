@@ -884,29 +884,38 @@ docs' fields and Discord's client as remembered.
 The GIF button left of the emoji button, or Ctrl+G, opens a picker with two
 tabs, GIFs and Emoji, as Discord's does; Ctrl+E opens it on Emoji. The two
 share the window: its left edge drags it wider, and each tab fits what it shows
-to that width. Discord's own provider is Klipy now; Yapfast doesn't use it and
-finds GIFs on Tenor's website (`yapfast-discord/src/tenor.rs`) instead:
+to that width. Discord finds GIFs through Klipy, and Yapfast asks Discord as
+its desktop client does:
 
-- Tenor's API needs a key, so the pages are read as they are served, as the
-  BringBackTenor plugin for BetterDiscord does: `/` for the trending GIFs and
-  the home's GIF, `/explore` for its terms, `/search/{words}-gifs` for a
+- *Find GIFs on Tenor* in Settings → Messages, off until turned on, takes the
+  picker's GIFs from Tenor's website instead (`yapfast-discord/src/tenor.rs`;
+  `Action::SetTenorGifs`, and `gifs::use_tenor`, which the services read).
+  Tenor's API needs a key, so the pages are read as they are served, as the
+  BringBackTenor plugin for BetterDiscord does: `/` for the trending GIFs
+  and the home's GIF, `/explore` for its terms, `/search/{words}-gifs` for a
   search. Each result is a `<figure class="UniversalGifListItem">` with its
   page, `/view/…`, which a message sends and Discord shows as the GIF, and its
   pictures; the small animated WebP is the tile. These requests go to
-  tenor.com without the account's token (`Api::tenor_page`), and nothing goes
-  to Discord for them. The home is asked for each time the picker opens and
-  isn't kept on disk. Tenor offers no search suggestions and has no picks to
-  report. Tenor can change its pages without notice, which would leave the
-  picker empty until the parser follows.
-- The home shows a Favorites tile, a "Trending GIFs" tile and the terms,
-  110px tall, two to a row. A term searches for itself; Trending GIFs lists
-  the trending page.
-- Typing searches a quarter second after the last key. Results come in
-  Discord's masonry: columns at least 200px wide with 12px gutters, each GIF
-  going to the shortest.
+  tenor.com without the account's token (`Api::tenor_page`), nothing goes
+  to Discord for them, and no search suggestions or `/gifs/select` reports
+  are made. The home isn't kept on disk, and switching drops what the picker
+  holds. Favourites are the account's own and are keyed by page, so Tenor's
+  and Klipy's mix there. Tenor can change its pages without notice, which
+  would leave the picker empty until the parser follows.
+- The home is `GET /gifs/trending?media_format=tinywebp&locale=en-US`:
+  trending terms, each with a picture, and one trending GIF. It shows a
+  Favorites tile, a "Trending GIFs" tile and the terms, 110px tall, two to a
+  row. A term searches for itself; Trending GIFs lists `GET
+  /gifs/trending-gifs`.
+- Typing searches with `GET /gifs/search?q=` a quarter second after the last
+  key, as Discord's does. Results come in Discord's masonry: columns at
+  least 200px wide with 12px gutters, each GIF going to the shortest. Within
+  1180px of the end, `GET /gifs/suggest?q=&limit=5` offers other terms, as
+  buttons under the results ("Your perfect GIF is in another castle").
 - A click sends the GIF's page URL as a message, keeping a reply that was
-  being written. Discord unfurls the URL into a gifv embed, whose picture
-  Yapfast plays. Shift and a click puts the URL in the message instead.
+  being written, and a search's pick is reported with `POST /gifs/select`
+  `{id, q}`. Discord unfurls the URL into a gifv embed, whose picture Yapfast
+  plays. Shift and a click puts the URL in the message instead.
 - A favourite's thumbnail is kept in `discord-gifs/`: a video, or a file up to
   256 KiB, as it came, and any other as a VP9 WebM at the tile's width, which
   keeps its frames and timing. One whose GIF is no longer

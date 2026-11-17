@@ -201,7 +201,7 @@ errors make it taller than the minimum window. SSO and OAuth are still pending.
   on after being let go elsewhere. It leaves a bar alone while its picker or
   menu is open. A pointer that stays put is told what's under it as the
   buttons change, so its tooltip and highlight match what a click does.
-- A GIF picker next to the emoji button, on Discord: a search over Tenor,
+- A GIF picker next to the emoji button, on Discord: a search over Klipy,
   trending terms and favourites, as in Discord's client. A click sends a GIF,
   Shift and a click puts it in the message, and a star keeps it among the
   favourites; GIFs and moving pictures in messages have the star too. A

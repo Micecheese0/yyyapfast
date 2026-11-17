@@ -7255,7 +7255,8 @@ async fn lists_a_channels_threads_as_discords_client_does() {
     .await;
 }
 
-/// The GIF picker's favourites in the second settings, which another client's change
+/// The GIF picker's searches, its pictures from the provider, the
+/// favourites in the second settings, which another client's change
 /// updates live, and one sent by a direct link to its file. Part of
 /// [`talks_to_the_fake_server`].
 #[tokio::test(flavor = "multi_thread")]
@@ -7266,6 +7267,33 @@ async fn finds_gifs_as_discords_client_does() {
     let server = fixture.server;
     let guild = fixture.guild.as_str();
     let general = fixture.general.as_str();
+    let trending = discord.gifs_trending().await.unwrap();
+    assert_eq!(trending.categories[0].name, "happy");
+    assert!(trending.preview.is_some());
+    let found = discord.gifs_search("dance").await.unwrap();
+    let names: Vec<&str> = found.iter().map(|gif| gif.url.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "https://klipy.com/gifs/dance-9102",
+            "https://klipy.com/gifs/party-9104",
+            "https://klipy.com/gifs/spin-9109"
+        ]
+    );
+    assert!(discord.gifs_search("nothing").await.unwrap().is_empty());
+    assert_eq!(discord.gifs_trending_gifs().await.unwrap().len(), 10);
+    assert_eq!(discord.gifs_suggest("dance", 5).await.unwrap().len(), 5);
+    // The picture, which the picker animates.
+    let picture = discord.download(&found[0].src, 1 << 20).await.unwrap();
+    assert_eq!(&picture[8..12], b"WEBP");
+    discord
+        .gif_select(found[0].id.as_deref().unwrap(), "dance")
+        .await
+        .unwrap();
+    assert!(
+        control(server, "GET", "/_control/gif-selects", "").contains(r#""id":"9102","q":"dance""#)
+    );
+
     // The same settings count the places Alice used, which rank where the
     // Forward To dialog lists them: Weekend plans and #general.
     let places = discord.places_used().await.unwrap();

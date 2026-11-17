@@ -60,7 +60,29 @@ pub(super) fn command(
     match command {
         DiscordCommand::GifCategories => {
             tokio::spawn(async move {
-                // Tenor's home is asked for every time it opens.
+                // The home Discord last answered shows at once, and one answered
+                // within a day is shown without asking again: its terms are
+                // trending ones, which move daily.
+                // Tenor's home is asked for every time: what Yapfast kept is
+                // Discord's provider's, and the two don't mix.
+                let tenor = yapfast_discord::gifs::tenor();
+                let kept = if tenor {
+                    None
+                } else {
+                    tokio::task::spawn_blocking(yapfast_discord::cache::gif_home_answer)
+                        .await
+                        .ok()
+                        .flatten()
+                };
+                if let Some(home) = &kept {
+                    let (categories, preview) = kept_home(home);
+                    let _ = events.send(Event::GifCategories(Ok((categories, preview))));
+                    if yapfast_discord::cache::gif_home_is_fresh(home.fetched) {
+                        let urls = home.terms.iter().map(|term| term.src.clone()).collect();
+                        keep_home_pictures(&discord, urls).await;
+                        return;
+                    }
+                }
                 match discord.gifs_trending().await {
                     Ok(trending) => {
                         let categories = trending
@@ -71,6 +93,24 @@ pub(super) fn command(
                                 src: category.src.clone(),
                             })
                             .collect();
+                        let home = yapfast_discord::cache::KeptHome {
+                            fetched: now_ms(),
+                            terms: trending
+                                .categories
+                                .iter()
+                                .map(|category| yapfast_discord::cache::KeptTerm {
+                                    name: category.name.clone(),
+                                    src: category.src.clone(),
+                                })
+                                .collect(),
+                            preview: trending.preview.as_ref().map(kept_gif),
+                        };
+                        if !tenor {
+                            let _ = tokio::task::spawn_blocking(move || {
+                                yapfast_discord::cache::keep_gif_home_answer(&home)
+                            })
+                            .await;
+                        }
                         let preview = trending.preview.map(gif);
                         let _ = events.send(Event::GifCategories(Ok((categories, preview))));
                         let urls = trending
@@ -79,6 +119,10 @@ pub(super) fn command(
                             .map(|category| category.src)
                             .collect();
                         keep_home_pictures(&discord, urls).await;
+                    }
+                    // A kept home still shows when Discord can't be asked.
+                    Err(error) if kept.is_some() => {
+                        tracing::debug!(%error, "could not refresh the GIF picker's home");
                     }
                     Err(error) => {
                         let _ = events.send(Event::GifCategories(Err(format!(
@@ -543,6 +587,47 @@ async fn keep_home_pictures(discord: &Discord, mut urls: Vec<String>) {
             keep_home_picture(&discord, &url).await;
         });
     }
+}
+
+/// The home Discord last answered, as the picker shows it.
+fn kept_home(home: &yapfast_discord::cache::KeptHome) -> (Vec<GifCategory>, Option<Gif>) {
+    let categories = home
+        .terms
+        .iter()
+        .map(|term| GifCategory {
+            name: term.name.clone(),
+            src: term.src.clone(),
+        })
+        .collect();
+    let preview = home.preview.as_ref().map(|kept| Gif {
+        id: kept.id.clone(),
+        url: kept.url.clone(),
+        src: kept.src.clone(),
+        gif_src: kept.gif_src.clone(),
+        width: kept.width,
+        height: kept.height,
+    });
+    (categories, preview)
+}
+
+/// One of the home's GIFs as it is kept.
+fn kept_gif(gif: &yapfast_discord::gifs::Gif) -> yapfast_discord::cache::KeptHomeGif {
+    yapfast_discord::cache::KeptHomeGif {
+        id: gif.id.clone(),
+        url: gif.url.clone(),
+        src: gif.src.clone(),
+        gif_src: gif.gif_src.clone(),
+        width: gif.width,
+        height: gif.height,
+    }
+}
+
+/// The time now, in Unix milliseconds.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 /// Keeps the home's picture at `url` in the home's own cache, unless it's there

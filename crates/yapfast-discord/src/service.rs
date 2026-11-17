@@ -2603,38 +2603,65 @@ impl Discord {
         let _ = self.requests.send(Request::Inactive(since, show_idle));
     }
 
-    /// The GIF picker's home: Tenor's terms, with a GIF of its trending ones.
+    /// The GIF picker's home: trending terms with a GIF each.
     pub async fn gifs_trending(&self) -> Result<crate::gifs::Trending> {
-        let (explore, home) = futures_util::future::join(
-            self.api.tenor_page("/explore"),
-            self.api.tenor_page("/"),
-        )
-        .await;
-        Ok(crate::gifs::Trending {
-            categories: crate::tenor::parse_categories(&explore?),
-            preview: crate::tenor::parse_gifs(&home?).into_iter().next(),
-        })
+        if crate::gifs::tenor() {
+            let (explore, home) = futures_util::future::join(
+                self.api.tenor_page("/explore"),
+                self.api.tenor_page("/"),
+            )
+            .await;
+            return Ok(crate::gifs::Trending {
+                categories: crate::tenor::parse_categories(&explore?),
+                preview: crate::tenor::parse_gifs(&home?).into_iter().next(),
+            });
+        }
+        Ok(crate::gifs::Trending::parse(
+            &self.api.gifs_trending().await?,
+        ))
     }
 
     /// The GIFs trending now.
     pub async fn gifs_trending_gifs(&self) -> Result<Vec<crate::gifs::Gif>> {
-        Ok(crate::tenor::parse_gifs(&self.api.tenor_page("/").await?))
+        if crate::gifs::tenor() {
+            return Ok(crate::tenor::parse_gifs(&self.api.tenor_page("/").await?));
+        }
+        Ok(crate::gifs::parse_list(
+            &self.api.gifs_trending_gifs().await?,
+        ))
     }
 
     /// GIFs for `query`.
     pub async fn gifs_search(&self, query: &str) -> Result<Vec<crate::gifs::Gif>> {
-        let page = self.api.tenor_page(&crate::tenor::search_path(query)).await?;
-        Ok(crate::tenor::parse_gifs(&page))
+        if crate::gifs::tenor() {
+            let page = self.api.tenor_page(&crate::tenor::search_path(query)).await?;
+            return Ok(crate::tenor::parse_gifs(&page));
+        }
+        Ok(crate::gifs::parse_list(&self.api.gifs_search(query).await?))
     }
 
-    /// Terms to try instead of `query`: Tenor's pages suggest none.
-    pub async fn gifs_suggest(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
-        Ok(Vec::new())
+    /// Up to `limit` terms to try instead of `query`.
+    pub async fn gifs_suggest(&self, query: &str, limit: u32) -> Result<Vec<String>> {
+        // Tenor's pages suggest nothing to search for instead.
+        if crate::gifs::tenor() {
+            return Ok(Vec::new());
+        }
+        let terms = self.api.gifs_suggest(query, limit).await?;
+        Ok(terms
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|term| term.as_str().map(str::to_owned))
+            .collect())
     }
 
-    /// Tenor has no picks to be told of.
-    pub async fn gif_select(&self, _id: &str, _query: &str) -> Result<()> {
-        Ok(())
+    /// Tells the provider a search for `query` led to the GIF `id`.
+    pub async fn gif_select(&self, id: &str, query: &str) -> Result<()> {
+        // Tenor's GIFs have no id of Discord's provider's to report.
+        if crate::gifs::tenor() {
+            return Ok(());
+        }
+        self.api.gif_select(id, query).await
     }
 
     /// Discord's default sticker packs as Yapfast last saw them, to show

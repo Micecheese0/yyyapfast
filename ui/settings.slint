@@ -1213,6 +1213,7 @@ export component MessageSettings inherits VerticalLayout {
     in-out property <bool> free-stickers;
     in-out property <bool> clip-bypass;
     in-out property <bool> force-clip;
+    in-out property <bool> tenor-gifs;
     /// The networks in use, which the descriptions name.
     in property <bool> matrix;
     in property <bool> discord;
@@ -1331,6 +1332,12 @@ export component MessageSettings inherits VerticalLayout {
         text: "Send large videos as clips";
         description: "An MP4 or MOV larger than your file limit goes as a clip, up to 100 MB. Discord may change what it takes as a clip.";
         checked <=> root.clip-bypass;
+        toggled => { root.preferences-changed(); }
+    }
+    if root.discord: SettingsSwitch {
+        text: "Find GIFs on Tenor";
+        description: "The GIF picker searches Tenor's website instead of Discord's picker, which uses Klipy now. A GIF goes as its Tenor link. Yapfast asks tenor.com without your Discord login.";
+        checked <=> root.tenor-gifs;
         toggled => { root.preferences-changed(); }
     }
     if root.discord && root.clip-bypass: SettingsSwitch {
