@@ -110,7 +110,7 @@ pub(super) fn command(
                     let id = channel.clone();
                     // One more than `most`, to tell whether there are more.
                     let mut entries = tokio::task::spawn_blocking(move || {
-                        yapfast_discord::msglog::entries_newest(&id, most.saturating_add(1))
+                        yapfast_discord::msglog::entries_with_media(&id, most.saturating_add(1))
                     })
                     .await
                     .unwrap_or_default();
@@ -176,6 +176,7 @@ fn list(parts: &[Part], me: &str) -> Vec<LogEntry> {
                     deleted: logged.message.deleted,
                     edited: !logged.message.history.is_empty(),
                     bulk: logged.bulk,
+                    media: logged.media,
                     ghost: logged.message.deleted
                         && !me.is_empty()
                         && (logged.message.mentions.iter().any(|id| id == me)

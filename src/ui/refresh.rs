@@ -2352,7 +2352,8 @@ impl Adapter {
                     0 => format!("No deleted messages are logged for {place}."),
                     1 => format!("No ghost pings are logged for {place}."),
                     2 => format!("No edited messages are logged for {place}."),
-                    _ => format!("No mass deletions are logged for {place}."),
+                    3 => format!("No mass deletions are logged for {place}."),
+                    _ => format!("No saved pictures, GIFs or videos are logged for {place}."),
                 },
                 _ => String::new(),
             }

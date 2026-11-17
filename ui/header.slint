@@ -297,10 +297,10 @@ export component LogPopover inherits Rectangle {
     callback show-more;
     callback open-link(string);
     callback close;
-    property <[string]> tabs: ["Deleted", "Ghost pings", "Edited", "Mass deletions"];
+    property <[string]> tabs: ["Deleted", "Ghost pings", "Edited", "Mass deletions", "Media"];
     /// How tall it would be to show every entry.
     out property <length> fit: 49px + 44px + 32px + (root.note != "" ? 172px : list.preferred-height);
-    width: 480px;
+    width: 580px;
     Popover {
         icon: @image-url("icons/history.svg");
         heading: root.title;

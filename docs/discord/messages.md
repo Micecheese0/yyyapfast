@@ -1040,8 +1040,10 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   `LogPopover` in `ui/header.slint`, built like the pins popup). Its tabs list,
   latest first, the channel's *Deleted* messages, *Ghost pings* (deleted
   messages that mentioned the account or @everyone), *Edited* messages, with
-  what each said before quoted above it, and *Mass deletions*, which came in a
-  `MESSAGE_DELETE_BULK`. `DiscordCommand::MessageLog` reads the channel's file
+  what each said before quoted above it, *Mass deletions*, which came in a
+  `MESSAGE_DELETE_BULK`, and *Media*, every message the log saved a picture,
+  GIF or video of, deleted or not (`msglog::entries_with_media`, which finds
+  them by the files' names in `media/*/{channel}/`). `DiscordCommand::MessageLog` reads the channel's file
   (`msglog::entries`) and builds each as a pinned message is built; its first
   pictures come from the files the log saved (`discord_text/message_log.rs`,
   decoded where they are), or from Discord when the log has none.

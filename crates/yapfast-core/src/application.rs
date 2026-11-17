@@ -269,7 +269,7 @@ pub struct MessageLog {
     pub gone: bool,
     /// The oldest first, rather than the newest.
     pub oldest_first: bool,
-    /// The tab: 0 deleted, 1 ghost pings, 2 edited, 3 mass deletions.
+    /// The tab: 0 deleted, 1 ghost pings, 2 edited, 3 mass deletions, 4 media.
     pub tab: usize,
     /// The channel's logged messages, the latest first; `None` while they're
     /// on their way.
@@ -294,7 +294,8 @@ impl MessageLog {
                 0 => entry.deleted && !entry.bulk,
                 1 => entry.ghost,
                 2 => entry.edited,
-                _ => entry.deleted && entry.bulk,
+                3 => entry.deleted && entry.bulk,
+                _ => entry.media,
             })
             .collect();
         // A stable sort, so a purge's messages keep the order they came in.
