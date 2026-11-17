@@ -8,6 +8,10 @@ name: Windows installer
 
 on:
   workflow_dispatch:
+  # A push to this branch builds too, which needs no click on a fork whose
+  # default branch lacks this file.
+  push:
+    branches: [nitro-bypasses]
 
 permissions:
   contents: read
