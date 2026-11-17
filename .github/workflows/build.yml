@@ -1,12 +1,9 @@
-# Builds Yapfast for Windows, Linux and macOS in one run, on demand or on a
+# Builds Yapfast for Windows and Linux in one run, on demand or on a
 # push to nitro-bypasses: Actions > Build > Run workflow. Nothing is published
 # and no secrets are used; each platform's files are artifacts of the run.
 #
 #   windows   the installer (Yapfast-*-windows-x64-setup.exe) and the portable ZIP
 #   linux     the AppImage and its .zsync file
-#   macos     an experiment: Yapfast has no macOS support yet (README, "macOS"),
-#             so this is expected to fail, and it can't fail the run. Its log
-#             shows what is missing.
 #
 # Windows is cross-built on Linux as scripts/build-windows does it, and Inno
 # Setup compiles the installer on a Windows runner, since Wine doesn't start on
@@ -112,21 +109,3 @@ jobs:
             target/dist/linux/Yapfast-*.AppImage.zsync
           if-no-files-found: error
           compression-level: 0
-
-  macos:
-    runs-on: macos-latest
-    # Yapfast has no macOS build; this tries one and tells what stops it.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          key: macos
-      - name: Build
-        run: cargo build --locked --release --no-default-features --features desktop,discord
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-experimental
-          path: target/release/yapfast
-          if-no-files-found: error
