@@ -1277,6 +1277,13 @@ struct Layout {
     keep_deleted: bool,
     keep_edits: bool,
     log_bots: bool,
+    /// The `MsgLogData` folder keeps messages and media, and how large each
+    /// kind of file may be: 0 to 4 for 5 MB, 25 MB, 100 MB, 500 MB or no limit;
+    /// none while it's the default.
+    archive: bool,
+    log_image_size: Option<i32>,
+    log_gif_size: Option<i32>,
+    log_video_size: Option<i32>,
     /// Nameplates show; on unless turned off.
     nameplates: Option<bool>,
     /// Long messages fold to a few lines, with Show more; off unless turned
@@ -1480,6 +1487,18 @@ fn chosen<T: Copy>(choices: &[T], index: i32) -> T {
         .unwrap_or(choices[0])
 }
 
+/// The largest a file of the message log may be, in MB, for the size the
+/// settings chose, 0 to 4: 0 means no limit.
+fn log_size_mb(choice: i32) -> u64 {
+    match choice {
+        0 => 5,
+        1 => 25,
+        2 => 100,
+        3 => 500,
+        _ => 0,
+    }
+}
+
 impl Layout {
     /// The switches for what Discord keeps for Nitro, as the application takes
     /// them.
@@ -1498,6 +1517,10 @@ impl Layout {
             deleted: self.keep_deleted,
             edits: self.keep_edits,
             bots: self.log_bots,
+            archive: self.archive,
+            image_mb: log_size_mb(self.log_image_size.unwrap_or(1)),
+            gif_mb: log_size_mb(self.log_gif_size.unwrap_or(1)),
+            video_mb: log_size_mb(self.log_video_size.unwrap_or(2)),
         }
     }
 
@@ -1693,6 +1716,10 @@ impl Layout {
         window.set_keep_deleted(self.keep_deleted);
         window.set_keep_edits(self.keep_edits);
         window.set_log_bots(self.log_bots);
+        window.set_archive(self.archive);
+        window.set_log_image_size(self.log_image_size.unwrap_or(1));
+        window.set_log_gif_size(self.log_gif_size.unwrap_or(1));
+        window.set_log_video_size(self.log_video_size.unwrap_or(2));
         window.set_show_nameplates(self.nameplates.unwrap_or(true));
         window.set_collapse_long(self.collapse_long);
         window.set_animate(choice(&ANIMATES, self.animate));

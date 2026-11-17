@@ -48,7 +48,7 @@ import { PersonRow, VoiceCard, CallLink, CallLinkCard, LinkTouch, SignalIcon, Vo
 import { ServerRow, RoomRow, StatusDot, ServerRail, ServerHeader, RoomList, VoiceCardView } from "rail.slint";
 import { StagedFile, StagedTile, Composer, MentionRow, MentionList, EmojiSuggestions, RequestBar } from "composer.slint";
 import { InlineEdit, EmojiCell, EmojiRow, EmojiTile, EmojiSection, RailSection, EmojiCard, EmojiCardView, MessageStickerCard, MessageStickerCardView, MessageRow, ReactionToggle, EmojiButton, EmojiPicker, MessageMenu, MessageGallery, MessageStickers, FileCard, MessageContent, EmbedView, BotTag, NoConversation, ConversationStart, HistoryEdge, UnreadBar, PresentBar, ImageViewer, VideoViewer, VideoPlayer, VoicePlayer, Polls } from "messages.slint";
-import { Choices, SettingsRow, SettingsScreen, AccountSettings, AppearanceSettings, ThemeCard, ThemeColour, VoiceSettings, KeybindSettings, KeybindRow, MessageSettings, NotificationSettings, SoundSettings, AdvancedSettings, DiscordLinkSettings, DiscordSettings, BlockedRow, GameActivitySettings, GameExecutable, AboutSettings } from "settings.slint";
+import { Choices, SettingsRow, SettingsScreen, AccountSettings, AppearanceSettings, ThemeCard, ThemeColour, VoiceSettings, KeybindSettings, KeybindRow, MessageSettings, MessageLogSettings, NotificationSettings, SoundSettings, AdvancedSettings, DiscordLinkSettings, DiscordSettings, BlockedRow, GameActivitySettings, GameExecutable, AboutSettings } from "settings.slint";
 import { ActivityMenu, MemberRow, MemberActivityRow, ProfileData, BadgeTipCard, ProfileServerRow, MemberPanel, ProfileCard, ProfileModal, ServerCard, RoleCard, TagCard, TagCardView } from "people.slint";
 import { RequestRow, FriendRow, FriendsScreen, HeaderTab, RequestsScreen, AddFriendDialog } from "friends.slint";
 import { ContactRow, PlaceRow, ReactionPill, ReactorRow, StatusDialog, NewDmDialog, ForwardDialog, QuickSwitcher, ReactionsDialog, StatusMenu, PersonPrompt, PersonDialog, LeavingDialog, PollAnswerDraft, PollDialog } from "dialogs.slint";
@@ -1300,6 +1300,10 @@ export component YapfastWindow inherits Window {
     in-out property <bool> keep-deleted;
     in-out property <bool> keep-edits;
     in-out property <bool> log-bots;
+    in-out property <bool> archive;
+    in-out property <int> log-image-size: 1;
+    in-out property <int> log-gif-size: 1;
+    in-out property <int> log-video-size: 2;
     /// Whether nameplates show, in member lists and on the account's card.
     in-out property <bool> show-nameplates: true;
     /// When animations play: 0 while Yapfast has the focus, 1 always, 2 never.
@@ -4464,9 +4468,15 @@ export component YapfastWindow inherits Window {
             link-previews <=> root.link-previews; boost-gems <=> root.boost-gems; share-typing <=> root.share-typing;
             animate <=> root.animate;
             reply-ping <=> root.reply-ping-default; strip-tracking <=> root.strip-tracking;
-            free-emoji <=> root.free-emoji; free-stickers <=> root.free-stickers; clip-bypass <=> root.clip-bypass; force-clip <=> root.force-clip; tenor-gifs <=> root.tenor-gifs; keep-deleted <=> root.keep-deleted; keep-edits <=> root.keep-edits; log-bots <=> root.log-bots;
+            free-emoji <=> root.free-emoji; free-stickers <=> root.free-stickers; clip-bypass <=> root.clip-bypass; force-clip <=> root.force-clip; tenor-gifs <=> root.tenor-gifs;
             collapse-long <=> root.collapse-long;
             matrix: root.matrix-build; discord: root.discord-linked;
+            preferences-changed => { root.preferences-changed(); }
+        }
+        if root.settings-section == 11: MessageLogSettings {
+            keep-deleted <=> root.keep-deleted; keep-edits <=> root.keep-edits; log-bots <=> root.log-bots;
+            archive <=> root.archive;
+            image-size <=> root.log-image-size; gif-size <=> root.log-gif-size; video-size <=> root.log-video-size;
             preferences-changed => { root.preferences-changed(); }
         }
         if root.settings-section == 3: NotificationSettings {

@@ -365,7 +365,7 @@ export component SettingsCard inherits Rectangle {
 export component SettingsScreen inherits Rectangle {
     /// The section showing: 0 account, 1 voice and video, 2 messages,
     /// 3 notifications, 4 Discord, 5 sounds, 6 advanced, 7 appearance,
-    /// 8 game activity, 9 about, 10 keybinds.
+    /// 8 game activity, 9 about, 10 keybinds, 11 message log.
     in-out property <int> settings-section;
     in property <bool> discord-build;
     in property <bool> preview;
@@ -387,6 +387,7 @@ export component SettingsScreen inherits Rectangle {
         { text: "Voice & video", icon: @image-url("icons/headphones.svg"), id: 1 },
         { text: "Keybinds", icon: @image-url("icons/keyboard.svg"), id: 10 },
         { text: "Messages", icon: @image-url("icons/message-circle.svg"), id: 2 },
+        { text: "Message log", icon: @image-url("icons/message-circle.svg"), id: 11 },
         { text: "Notifications", icon: @image-url("icons/bell.svg"), id: 3 },
         { text: "Sounds", icon: @image-url("icons/volume-2.svg"), id: 5 },
         { text: "Discord", icon: @image-url("icons/discord.svg"), id: 4 },
@@ -416,7 +417,8 @@ export component SettingsScreen inherits Rectangle {
                 : root.settings-section == 2 ? "Messages" : root.settings-section == 3 ? "Notifications"
                 : root.settings-section == 4 ? "Discord" : root.settings-section == 5 ? "Sounds"
                 : root.settings-section == 6 ? "Advanced" : root.settings-section == 7 ? "Appearance"
-                : root.settings-section == 9 ? "About" : root.settings-section == 10 ? "Keybinds" : "Game Activity";
+                : root.settings-section == 9 ? "About" : root.settings-section == 10 ? "Keybinds"
+                : root.settings-section == 11 ? "Message log" : "Game Activity";
             account-name: root.account-name; account-initial: root.account-initial;
             account-tint: root.account-tint; account-picture: root.account-picture;
             with-discord: root.discord-build && !root.preview;
@@ -1214,9 +1216,6 @@ export component MessageSettings inherits VerticalLayout {
     in-out property <bool> clip-bypass;
     in-out property <bool> force-clip;
     in-out property <bool> tenor-gifs;
-    in-out property <bool> keep-deleted;
-    in-out property <bool> keep-edits;
-    in-out property <bool> log-bots;
     /// The networks in use, which the descriptions name.
     in property <bool> matrix;
     in property <bool> discord;
@@ -1343,29 +1342,76 @@ export component MessageSettings inherits VerticalLayout {
         checked <=> root.tenor-gifs;
         toggled => { root.preferences-changed(); }
     }
-    if root.discord: SettingsSwitch {
-        text: "Keep deleted messages";
-        description: "A message someone deletes, or a purge removes, stays in the chat, greyed and marked deleted, for the messages Yapfast has loaded. It is still there after a restart. A deleted message that mentioned you stays highlighted.";
-        checked <=> root.keep-deleted;
-        toggled => { root.preferences-changed(); }
-    }
-    if root.discord: SettingsSwitch {
-        text: "Keep edit history";
-        description: "A message that is edited shows what it said before, quoted above it, up to the last 10 versions.";
-        checked <=> root.keep-edits;
-        toggled => { root.preferences-changed(); }
-    }
-    if root.discord && (root.keep-deleted || root.keep-edits): SettingsSwitch {
-        text: "Keep bots' messages too";
-        description: "Also keeps deleted and edited messages of bots and webhooks, which are left out otherwise.";
-        checked <=> root.log-bots;
-        toggled => { root.preferences-changed(); }
-    }
     if root.discord && root.clip-bypass: SettingsSwitch {
         text: "Send every video as a clip";
         description: "Also sends MP4 and MOV videos under your file limit as clips, which show as clips in the chat.";
         checked <=> root.force-clip;
         toggled => { root.preferences-changed(); }
+    }
+}
+
+// Settings: the message log, and the MsgLogData folder it keeps messages and
+// media in.
+export component MessageLogSettings inherits VerticalLayout {
+    spacing: 12px;
+    in-out property <bool> keep-deleted;
+    in-out property <bool> keep-edits;
+    in-out property <bool> log-bots;
+    in-out property <bool> archive;
+    /// The largest file of each kind: 0 5 MB, 1 25 MB, 2 100 MB, 3 500 MB, 4 no limit.
+    in-out property <int> image-size: 1;
+    in-out property <int> gif-size: 1;
+    in-out property <int> video-size: 2;
+    callback preferences-changed;
+    property <[string]> sizes: ["5 MB", "25 MB", "100 MB", "500 MB", "No limit"];
+    SettingsTitle { text: "Message log"; }
+    SettingsHeading { text: "IN THE CHAT"; }
+    SettingsSwitch {
+        text: "Keep deleted messages";
+        description: "A message someone deletes, or a purge removes, stays in the chat, greyed and marked deleted. A deleted message that mentioned you stays highlighted.";
+        checked <=> root.keep-deleted;
+        toggled => { root.preferences-changed(); }
+    }
+    SettingsSwitch {
+        text: "Keep edit history";
+        description: "A message that is edited shows what it said before, quoted above it, up to the last 10 versions.";
+        checked <=> root.keep-edits;
+        toggled => { root.preferences-changed(); }
+    }
+    SettingsSwitch {
+        text: "Include bots' messages";
+        description: "Also logs messages of bots and webhooks, which are left out otherwise.";
+        checked <=> root.log-bots;
+        toggled => { root.preferences-changed(); }
+    }
+    SettingsHeading { text: "MSGLOGDATA FOLDER"; }
+    SettingsSwitch {
+        text: "Save messages and media";
+        description: "Writes every message you get, and its pictures, GIFs and videos, to the MsgLogData folder in Yapfast's data folder, whichever channel it is in. The files are not encrypted and no login owns them: signing out or resetting your password leaves them be, and only you delete the folder.";
+        checked <=> root.archive;
+        toggled => { root.preferences-changed(); }
+    }
+    SettingsHeading { text: "LARGEST FILE TO SAVE"; }
+    Text { text: "Pictures"; color: Theme.secondary; font-size: 14px; }
+    Choices {
+        label: "Largest picture to save";
+        options: root.sizes;
+        current <=> root.image-size;
+        chosen(index) => { root.image-size = index; root.preferences-changed(); }
+    }
+    Text { text: "GIFs"; color: Theme.secondary; font-size: 14px; }
+    Choices {
+        label: "Largest GIF to save";
+        options: root.sizes;
+        current <=> root.gif-size;
+        chosen(index) => { root.gif-size = index; root.preferences-changed(); }
+    }
+    Text { text: "Videos"; color: Theme.secondary; font-size: 14px; }
+    Choices {
+        label: "Largest video to save";
+        options: root.sizes;
+        current <=> root.video-size;
+        chosen(index) => { root.video-size = index; root.preferences-changed(); }
     }
 }
 

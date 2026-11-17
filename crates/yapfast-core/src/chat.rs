@@ -446,12 +446,31 @@ pub struct Bypass {
 }
 
 /// What Discord's message logger keeps: deleted messages, earlier versions of
-/// edited ones, and whether bots' count.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// edited ones, whether bots' count, and the `MsgLogData` folder's messages and
+/// media, with the largest file of each kind in MB, 0 for no limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Logging {
     pub deleted: bool,
     pub edits: bool,
     pub bots: bool,
+    pub archive: bool,
+    pub image_mb: u64,
+    pub gif_mb: u64,
+    pub video_mb: u64,
+}
+
+impl Default for Logging {
+    fn default() -> Self {
+        Self {
+            deleted: false,
+            edits: false,
+            bots: false,
+            archive: false,
+            image_mb: 25,
+            gif_mb: 25,
+            video_mb: 100,
+        }
+    }
 }
 
 /// A file size as people read it: bytes, KB, then MB.

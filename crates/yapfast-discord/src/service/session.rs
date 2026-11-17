@@ -664,6 +664,32 @@ impl Session<'_> {
         ) {
             let _ = self.shared.live.send(live);
         }
+        // The message log, which keeps what came and what was deleted.
+        if crate::msglog::logging() {
+            match (event, &message) {
+                (Event::MessageCreate | Event::MessageUpdate, Some(message)) => {
+                    crate::msglog::message(
+                        &self.shared.api,
+                        message.clone(),
+                        *event == Event::MessageUpdate,
+                    );
+                }
+                (Event::MessageDelete, _) => crate::msglog::deleted(
+                    data["channel_id"].as_str().unwrap_or_default(),
+                    data["id"].as_str().map(str::to_owned).into_iter().collect(),
+                ),
+                (Event::MessageDeleteBulk, _) => crate::msglog::deleted(
+                    data["channel_id"].as_str().unwrap_or_default(),
+                    data["ids"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|id| id.as_str().map(str::to_owned))
+                        .collect(),
+                ),
+                _ => {}
+            }
+        }
         // A message request shows its latest message.
         let previewed = match (event, &message) {
             (Event::MessageCreate | Event::MessageUpdate, Some(message)) => {

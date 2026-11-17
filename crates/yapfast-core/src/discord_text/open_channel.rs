@@ -524,7 +524,7 @@ impl OpenChannel {
         if !(deleted || edits) {
             return;
         }
-        let logged = yapfast_discord::cache::logged(&self.channel);
+        let logged = yapfast_discord::msglog::logged(&self.channel);
         if logged.is_empty() {
             return;
         }
@@ -622,18 +622,7 @@ impl OpenChannel {
         let skip = kept()
             .count()
             .saturating_sub(yapfast_discord::cache::CHANNEL_MESSAGES);
-        // The newest, and every logged one, which the cache sends on to the
-        // message log, however old.
-        Some((
-            self.channel.clone(),
-            kept()
-                .enumerate()
-                .filter(|(index, message)| {
-                    *index >= skip || yapfast_discord::logger::is_logged(message)
-                })
-                .map(|(_, message)| message.clone())
-                .collect(),
-        ))
+        Some((self.channel.clone(), kept().skip(skip).cloned().collect()))
     }
 
     /// Hides the ephemeral message `item` for good, as Discord's "Dismiss

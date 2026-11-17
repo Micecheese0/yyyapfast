@@ -2279,6 +2279,10 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         layout.keep_deleted = window.get_keep_deleted();
         layout.keep_edits = window.get_keep_edits();
         layout.log_bots = window.get_log_bots();
+        layout.archive = window.get_archive();
+        layout.log_image_size = Some(window.get_log_image_size());
+        layout.log_gif_size = Some(window.get_log_gif_size());
+        layout.log_video_size = Some(window.get_log_video_size());
         layout.nameplates = Some(window.get_show_nameplates());
         layout.collapse_long = window.get_collapse_long();
         layout.animate = chosen(&ANIMATES, window.get_animate());

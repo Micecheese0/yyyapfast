@@ -4045,6 +4045,17 @@ impl Application {
                     edits: logging.edits,
                     bots: logging.bots,
                 });
+                // Messages are written for the switches that bring them back,
+                // and for the folder's own; media only for the folder's.
+                #[cfg(feature = "discord")]
+                yapfast_discord::msglog::set(yapfast_discord::msglog::Options {
+                    messages: logging.deleted || logging.edits || logging.archive,
+                    media: logging.archive,
+                    bots: logging.bots,
+                    image_mb: logging.image_mb,
+                    gif_mb: logging.gif_mb,
+                    video_mb: logging.video_mb,
+                });
                 #[cfg(not(feature = "discord"))]
                 let _ = logging;
                 vec![]

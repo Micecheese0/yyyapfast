@@ -1002,18 +1002,33 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
 - What's kept is what Yapfast holds: the open channels' messages and the
   newest of those shown lately. A page of history never brings a deleted
   message back, and `Run::fit` leaves a kept one be.
-- Every kept deleted message, and every edited message's earlier versions, go
-  to `discord-message-log/`, one encrypted file per channel
-  (`cache::save_messages`, which `take_changes` feeds with every logged
-  message, however old). It has no limit and nothing prunes it: it goes only
-  with the login, unlike `discord-messages/`, which keeps each channel's
-  newest 100 messages for the 300 channels used last. When a page of history
-  loads, `OpenChannel::restore_logged` puts back the logged messages that fall
-  among the loaded ones, so an old deleted message shows when you scroll to
-  where it was. The switches decide what is logged as it happens, and what shows.
-- Messages of channels Yapfast isn't holding aren't logged, to keep memory
-  down, and the plugin's log window, whitelists and ignored channels aren't
-  ported.
+- The log is the `MsgLogData` folder of Yapfast's data folder
+  (`yapfast-discord/src/msglog.rs`), plain files that no login owns: they
+  aren't encrypted with the credential store's key, which a password reset
+  could lose, and unlinking an account leaves them be. `Session::event`
+  writes it for every channel the account gets messages of, not only the
+  open one, and holds nothing in memory: `messages/{channel}.jsonl` has a
+  line for each message that came, edit and deletion, and `media/images`,
+  `media/gifs` and `media/videos` hold the pictures, GIFs and videos
+  attached, as `{channel}/{message}-{n}-{name}`. A file larger than the
+  largest the settings allow for its kind, or when the folder switch is off,
+  isn't downloaded. It has no limit on the whole and nothing prunes it,
+  unlike `discord-messages/`, which keeps each channel's newest 100 messages
+  for the 300 channels used last.
+- Settings → Message log has the switches above, *Save messages and media*,
+  which writes every message and its files, and the largest picture, GIF and
+  video to save: 5, 25, 100 or 500 MB, or no limit (`Action::SetLogging`,
+  `msglog::set`). *Keep deleted messages* and *Keep edit history* write
+  messages, without media, too, so what they keep survives a restart.
+- When a page of history loads, `OpenChannel::restore_logged` reads the
+  channel's file (`msglog::logged`, which folds its lines, two passes, so the
+  messages that stay as they were aren't read in full) and puts back the
+  deleted messages and edited messages' earlier versions that fall among the
+  loaded ones, so an old deleted message shows when you scroll to where it
+  was. The chat shows no picture from the folder yet: a deleted message's
+  pictures show while Discord's CDN still serves them or the picture cache
+  holds them, and the files in the folder are there to open.
+- The plugin's log window, whitelists and ignored channels aren't ported.
 
 ## Mark Unread and message links
 

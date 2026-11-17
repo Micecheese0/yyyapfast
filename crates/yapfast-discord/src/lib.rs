@@ -24,6 +24,7 @@ pub mod game_detection;
 pub mod gateway;
 pub mod gifs;
 pub mod logger;
+pub mod msglog;
 pub mod gift;
 pub mod guild;
 pub mod interactions;
