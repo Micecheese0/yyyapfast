@@ -154,10 +154,7 @@ mod tests {
         message.deleted = true;
         assert_eq!(
             shown_content(&message),
-            "> first
-> line
-> second
-final"
+            "> first\n> line\n> second\nfinal"
         );
     }
 }
