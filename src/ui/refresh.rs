@@ -2352,7 +2352,8 @@ impl Adapter {
                     0 => format!("No deleted messages are logged for {place}."),
                     1 => format!("No ghost pings are logged for {place}."),
                     2 => format!("No edited messages are logged for {place}."),
-                    _ => format!("No mass deletions are logged for {place}."),
+                    3 => format!("No mass deletions are logged for {place}."),
+                    _ => format!("No saved pictures, GIFs or videos are logged for {place}."),
                 },
                 _ => String::new(),
             }
@@ -2381,9 +2382,10 @@ impl Adapter {
         for (at, entry) in entries.iter().enumerate() {
             let want = if named { entry.channel.as_str() } else { "" };
             if let Some(mut row) = self.models.message_log.row_data(at)
-                && row.heading.as_str() != want
+                && (row.heading.as_str() != want || row.room.as_str() != entry.room)
             {
                 row.heading = want.into();
+                row.room = entry.room.as_str().into();
                 self.models.message_log.set_row_data(at, row);
             }
         }

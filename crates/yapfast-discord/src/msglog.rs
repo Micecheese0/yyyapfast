@@ -642,12 +642,15 @@ async fn media(api: &Api, message: &Message) {
     }
 }
 
-/// A message the log holds as deleted, or edited with what it said before.
+/// A message the log holds as deleted, or edited with what it said before, or
+/// with files saved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Logged {
     pub message: Message,
     /// It went in a purge.
     pub bulk: bool,
+    /// The log saved a picture, GIF or video of it.
+    pub media: bool,
 }
 
 /// The messages of `channel` that were deleted, and those edited with what
@@ -667,6 +670,37 @@ pub fn entries(channel: &str) -> Vec<Logged> {
 /// [`entries`], the newest `most` of them: a deleted channel has all its
 /// messages to show.
 pub fn entries_newest(channel: &str, most: usize) -> Vec<Logged> {
+    read(channel, most, false)
+}
+
+/// [`entries_newest`], and the messages that have files saved, too, which the
+/// log window's Media tab lists.
+pub fn entries_with_media(channel: &str, most: usize) -> Vec<Logged> {
+    read(channel, most, true)
+}
+
+/// The ids of the messages of `channel` the log saved files of: each file is
+/// named for its message.
+fn saved_media(channel: &str) -> HashSet<String> {
+    let (Some(root), Some(channel)) = (root(), channel_name(channel)) else {
+        return HashSet::new();
+    };
+    [Kind::Image, Kind::Gif, Kind::Video]
+        .into_iter()
+        .filter_map(|kind| {
+            std::fs::read_dir(root.join("media").join(kind.folder()).join(channel)).ok()
+        })
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|file| {
+            let name = file.file_name();
+            let id = name.to_string_lossy().split('-').next()?.to_owned();
+            (!id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())).then_some(id)
+        })
+        .collect()
+}
+
+fn read(channel: &str, most: usize, media: bool) -> Vec<Logged> {
     let Some(file) = lines_file(channel) else {
         return Vec::new();
     };
@@ -676,7 +710,12 @@ pub fn entries_newest(channel: &str, most: usize) -> Vec<Logged> {
     };
     // Which messages were deleted or edited, so the rest aren't read in full;
     // all of them when the channel was deleted.
-    let mut wanted = HashSet::new();
+    let saved = if media {
+        saved_media(channel)
+    } else {
+        HashSet::new()
+    };
+    let mut wanted = saved.clone();
     let mut all = false;
     for line in first.lines().map_while(Result::ok) {
         if let Ok(light) = serde_json::from_str::<Light>(&line) {
@@ -758,9 +797,12 @@ pub fn entries_newest(channel: &str, most: usize) -> Vec<Logged> {
     }
     messages
         .into_iter()
-        .filter(|(_, message)| message.deleted || !message.history.is_empty())
+        .filter(|(_, message)| {
+            message.deleted || !message.history.is_empty() || saved.contains(&message.id)
+        })
         .map(|(order, message)| Logged {
             bulk: purged.contains(&order),
+            media: saved.contains(&message.id),
             message,
         })
         .collect()
@@ -772,6 +814,26 @@ pub fn local_media(message: &Message, index: usize) -> Option<PathBuf> {
     let attachment = message.attachments.get(index)?;
     let file = media_file(&root()?, kind(attachment)?, message, index, &attachment.name);
     file.is_file().then_some(file)
+}
+
+/// [`local_media`]'s file as an address, which the timeline shows a deleted
+/// message's attachment from, and opens it by.
+pub fn local_url(message: &Message, index: usize) -> Option<String> {
+    url::Url::from_file_path(local_media(message, index)?)
+        .ok()
+        .map(Into::into)
+}
+
+/// The file in the log's folder that `address`, a [`local_url`], names. No
+/// other file is named: an address from anywhere else, or one that leaves the
+/// folder, gives none.
+pub fn local_path(address: &str) -> Option<PathBuf> {
+    let path = url::Url::parse(address).ok()?.to_file_path().ok()?;
+    let inside = path.starts_with(root()?)
+        && !path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir));
+    inside.then_some(path)
 }
 
 #[cfg(test)]
@@ -862,6 +924,29 @@ mod tests {
         append("9", &[line("c", &said("3", "three", false))]);
         let after: Vec<_> = super::logged("9").iter().map(|m| m.id.clone()).collect();
         assert_eq!(after, ["1", "2"]);
+        // A message with a file saved is listed with the media, deleted or not.
+        std::fs::create_dir_all(root.join("media").join("images").join("9")).unwrap();
+        std::fs::write(root.join("media").join("images").join("9").join("3-0-x.png"), b"x")
+            .unwrap();
+        let with: Vec<_> = entries_with_media("9", 10)
+            .iter()
+            .map(|e| (e.message.id.clone(), e.media))
+            .collect();
+        assert_eq!(
+            with,
+            [("1".into(), false), ("2".into(), false), ("3".into(), true)]
+        );
+        assert_eq!(super::entries("9").len(), 2);
+        // The address of a saved file names that file, and only files here.
+        std::fs::create_dir_all(root.join("media")).unwrap();
+        let file = root.join("media").join("a b#c.png");
+        std::fs::write(&file, b"x").unwrap();
+        let address = url::Url::from_file_path(&file).unwrap().to_string();
+        assert_eq!(local_path(&address), Some(file));
+        let outside = std::env::temp_dir().join("msglog-outside.png");
+        let address = url::Url::from_file_path(&outside).unwrap().to_string();
+        assert_eq!(local_path(&address), None);
+        assert_eq!(local_path("https://cdn.discordapp.com/a.png"), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

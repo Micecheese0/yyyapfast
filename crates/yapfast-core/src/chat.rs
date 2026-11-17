@@ -468,6 +468,11 @@ pub struct LogEntry {
     pub bulk: bool,
     /// It was deleted and mentioned this account: a ghost ping.
     pub ghost: bool,
+    /// The log saved a picture, GIF or video of it.
+    pub media: bool,
+    /// Its channel's room id, which the window jumps to the message in; empty
+    /// for a channel that was deleted.
+    pub room: String,
 }
 
 /// What Discord's message logger keeps: deleted messages, earlier versions of

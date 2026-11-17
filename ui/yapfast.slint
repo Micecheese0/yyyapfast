@@ -4668,6 +4668,7 @@ export component YapfastWindow inherits Window {
             title: root.message-log-title; oldest-first: root.message-log-oldest-first;
             more: root.message-log-more; loading-more: root.message-log-loading-more;
             show-more => { root.show-more-log(); }
+            jump(room, item) => { root.show-message-log(false); root.jump-in-room(room, item); }
             toggle-order => { root.toggle-log-order(); }
             chose-tab(tab) => { root.set-log-tab(tab); }
             open-link(link) => { root.open-link(link); }

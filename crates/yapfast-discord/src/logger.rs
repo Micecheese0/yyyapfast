@@ -86,9 +86,18 @@ pub fn history_after_edit(old: &Message, new: &Message) -> Vec<String> {
 }
 
 /// `message` as it shows: its earlier versions quoted above it. A deleted one
-/// shows its words as they were, which the timeline tints.
+/// shows its words as they were, which the timeline tints, and where on disk
+/// the message log saved its files.
 pub fn shown_content(message: &Message) -> std::borrow::Cow<'_, str> {
-    if message.history.is_empty() {
+    let saved: Vec<std::path::PathBuf> = if message.deleted {
+        (0..message.attachments.len())
+            .filter_map(|index| crate::msglog::local_media(message, index))
+            .filter(|file| !file.to_string_lossy().contains('`'))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if message.history.is_empty() && saved.is_empty() {
         return std::borrow::Cow::Borrowed(&message.content);
     }
     let mut shown = String::new();
@@ -100,6 +109,15 @@ pub fn shown_content(message: &Message) -> std::borrow::Cow<'_, str> {
         }
     }
     shown.push_str(&message.content);
+    for file in saved {
+        if !shown.is_empty() {
+            shown.push_str("
+");
+        }
+        shown.push_str("Saved copy: `");
+        shown.push_str(&file.to_string_lossy());
+        shown.push('`');
+    }
     std::borrow::Cow::Owned(shown)
 }
 

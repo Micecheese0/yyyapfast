@@ -1026,16 +1026,33 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   deleted messages and edited messages' earlier versions that fall among the
   loaded ones, so an old deleted message shows when you scroll to where it
   was.
+- A deleted message's files show in the timeline from the folder, as Discord's
+  copy goes with the message. `msglog::local_url` gives a saved attachment's
+  `file://` address; `OpenChannel::publish` takes a deleted picture's preview
+  from it (`render::preview` decodes it where it lies, and
+  `msglog::local_path` names only files inside `MsgLogData`), and the viewer,
+  Save and Copy read it too (`OpenChannel::saved`). `logger::shown_content`
+  ends a deleted message with `Saved copy: ` and each saved file's path, which
+  shows in the timeline and the log window alike. A video or other file
+  isn't played or opened from the folder: the line says where it is.
 - The message log window is the clock button at the right of a channel's
   header, beside the pins and the member list (`Action::ShowMessageLog`,
   `LogPopover` in `ui/header.slint`, built like the pins popup). Its tabs list,
   latest first, the channel's *Deleted* messages, *Ghost pings* (deleted
   messages that mentioned the account or @everyone), *Edited* messages, with
-  what each said before quoted above it, and *Mass deletions*, which came in a
-  `MESSAGE_DELETE_BULK`. `DiscordCommand::MessageLog` reads the channel's file
+  what each said before quoted above it, *Mass deletions*, which came in a
+  `MESSAGE_DELETE_BULK`, and *Media*, every message the log saved a picture,
+  GIF or video of, deleted or not (`msglog::entries_with_media`, which finds
+  them by the files' names in `media/*/{channel}/`). `DiscordCommand::MessageLog` reads the channel's file
   (`msglog::entries`) and builds each as a pinned message is built; its first
   pictures come from the files the log saved (`discord_text/message_log.rs`,
   decoded where they are), or from Discord when the log has none.
+- A click on an entry, or its *Jump* button, closes the window and shows the
+  message in its channel (`Action::JumpInRoom`, with `LogEntry::room`). A
+  deleted message comes back in place where the channel loads around it, as
+  `restore_logged` puts back the ones among the loaded messages, so it needs
+  *Keep deleted messages* on. An entry of a channel that was deleted has no
+  room, so no button.
 - The window lists the newest first, and a click on *Newest first* under its
   tabs swaps it to the oldest first (`Action::ToggleLogOrder`,
   `MessageLog::shown` sorts by the message's time). A server's menu has *Open

@@ -126,6 +126,8 @@ export component HeaderSearch inherits Rectangle {
 // Jump button, shows it in the conversation.
 export component FoundCard inherits Rectangle {
     in property <FoundRow> found;
+    /// There's a place to show the message in; a deleted channel's has none.
+    in property <bool> can-jump: true;
     callback jump;
     callback open-link(string);
     min-height: content.preferred-height;
@@ -197,7 +199,7 @@ export component FoundCard inherits Rectangle {
                 }
             }
         }
-        if pointer.has-hover: ActionButton {
+        if pointer.has-hover && root.can-jump: ActionButton {
             x: parent.width - self.width - 8px; y: 8px;
             width: self.min-width; height: self.min-height;
             text: "Jump"; label: "Jump to the message"; small: true;
@@ -295,12 +297,14 @@ export component LogPopover inherits Rectangle {
     callback chose-tab(int);
     callback toggle-order;
     callback show-more;
+    /// Shows a message, by its room and item, in the conversation.
+    callback jump(string, string);
     callback open-link(string);
     callback close;
-    property <[string]> tabs: ["Deleted", "Ghost pings", "Edited", "Mass deletions"];
+    property <[string]> tabs: ["Deleted", "Ghost pings", "Edited", "Mass deletions", "Media"];
     /// How tall it would be to show every entry.
     out property <length> fit: 49px + 44px + 32px + (root.note != "" ? 172px : list.preferred-height);
-    width: 480px;
+    width: 580px;
     Popover {
         icon: @image-url("icons/history.svg");
         heading: root.title;
@@ -371,6 +375,8 @@ export component LogPopover inherits Rectangle {
                     }
                     FoundCard {
                         found: entry;
+                        can-jump: entry.room != "";
+                        jump => { if entry.room != "" { root.jump(entry.room, entry.item); } }
                         open-link(link) => { root.open-link(link); }
                     }
                 }
