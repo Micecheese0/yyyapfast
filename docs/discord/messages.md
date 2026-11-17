@@ -1015,7 +1015,7 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   isn't downloaded. It has no limit on the whole and nothing prunes it,
   unlike `discord-messages/`, which keeps each channel's newest 100 messages
   for the 300 channels used last.
-- Settings → Message log has the switches above, *Save messages and media*,
+- Settings → Message Logger has the switches above, *Save messages and media*,
   which writes every message and its files, and the largest picture, GIF and
   video to save: 5, 25, 100 or 500 MB, or no limit (`Action::SetLogging`,
   `msglog::set`). *Keep deleted messages* and *Keep edit history* write
@@ -1037,7 +1037,7 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   pictures come from the files the log saved (`discord_text/message_log.rs`,
   decoded where they are), or from Discord when the log has none.
 - Which servers and channels are logged is a list in `MsgLogData/rules.json`:
-  Settings → Message log chooses whether the log keeps all but the ones listed
+  Settings → Message Logger chooses whether the log keeps all but the ones listed
   or only the ones listed, and a server's or channel's context menu has *Log
   this channel*, *Don't log this channel* or the like for its mode, which adds
   it to the list or takes it off (`Action::ToggleLogged`,

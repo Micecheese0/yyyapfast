@@ -338,7 +338,7 @@ impl AppState {
 
     /// Whether the message log's list can take a server or channel: a
     /// Discord account is linked.
-    fn can_log_places(&self) -> bool {
+    pub(super) fn can_log_places(&self) -> bool {
         !self.preview && self.discord_user.is_some()
     }
 

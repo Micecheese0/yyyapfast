@@ -213,6 +213,10 @@ impl Application {
         if self.state.discord_online && self.may_leave(id) {
             choices.push(MenuChoice::LeaveServer);
         }
+        // Whether the message log keeps it, by the list in the log's settings.
+        if self.state.can_log_places() {
+            choices.push(MenuChoice::LogPlace);
+        }
         choices.extend([MenuChoice::CopyLink, MenuChoice::CopyId]);
         choices
     }
