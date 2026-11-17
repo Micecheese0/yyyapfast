@@ -47,6 +47,21 @@ fn wanted(message: &Message) -> bool {
     BOTS.load(Ordering::Relaxed) || !message.bot
 }
 
+/// Whether kept deleted messages show.
+pub fn shows_deleted() -> bool {
+    DELETED.load(Ordering::Relaxed)
+}
+
+/// Whether kept earlier versions show.
+pub fn shows_edits() -> bool {
+    EDITS.load(Ordering::Relaxed)
+}
+
+/// Whether `message` is one the log holds: deleted, or with earlier versions.
+pub fn is_logged(message: &Message) -> bool {
+    message.deleted || !message.history.is_empty()
+}
+
 /// Whether `message`, deleted now, stays.
 pub fn keeps_deleted(message: &Message) -> bool {
     DELETED.load(Ordering::Relaxed) && !message.deleted && wanted(message)

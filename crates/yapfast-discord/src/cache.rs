@@ -8,6 +8,10 @@
 //!   then. Written at most every [`SAVE_DELAY`] while connected.
 //! - `discord-messages/`: each channel shown lately, its newest
 //!   [`CHANNEL_MESSAGES`] messages, for the [`CHANNELS`] used last.
+//! - `discord-message-log/`: each channel's deleted messages and edited
+//!   ones' earlier versions that the message logger kept (see
+//!   [`crate::logger`]), with no limit and never pruned, so they aren't gone
+//!   when a channel leaves `discord-messages/`. Deleted with the login.
 //! - `discord-profiles/`: each profile shown lately, outside servers or in
 //!   one, as Discord last gave it, for the [`PROFILES`] shown last. A card
 //!   shows it at once while Discord's answer comes.
@@ -596,6 +600,10 @@ fn messages_directory() -> Option<PathBuf> {
     Some(file()?.with_file_name("discord-messages"))
 }
 
+fn log_directory() -> Option<PathBuf> {
+    Some(file()?.with_file_name("discord-message-log"))
+}
+
 fn profiles_directory() -> Option<PathBuf> {
     Some(file()?.with_file_name("discord-profiles"))
 }
@@ -653,7 +661,12 @@ pub(crate) fn relogin(token: &str) {
     let Some(earlier) = lock(&LOGIN).replace(login.clone()) else {
         return;
     };
-    let kept = [messages_directory(), profiles_directory(), previews()]
+    let kept = [
+        messages_directory(),
+        log_directory(),
+        profiles_directory(),
+        previews(),
+    ]
         .into_iter()
         .flatten()
         .filter_map(|directory| std::fs::read_dir(directory).ok())
@@ -785,12 +798,71 @@ pub fn messages(channel: &str) -> Vec<Message> {
     messages
 }
 
-/// Keeps a channel's newest [`CHANNEL_MESSAGES`] messages, oldest first. It
-/// writes to disk, so the async side calls it off its threads.
+/// Where a channel's logged messages are kept, see [`logged`].
+fn log_file(channel: &str) -> Option<PathBuf> {
+    if channel.is_empty() || !channel.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some(log_directory()?.join(format!("{channel}.json")))
+}
+
+/// The deleted messages and earlier versions of edited ones the logger kept
+/// of a channel for this login, oldest first, however many. It reads the
+/// disk.
+pub fn logged(channel: &str) -> Vec<Message> {
+    log_file(channel)
+        .and_then(|file| read_sealed(&file, "a Discord channel's message log"))
+        .unwrap_or_default()
+}
+
+/// Adds `marked`, messages the logger holds, to a channel's log, each
+/// replacing what the log has of the same message. It is never cut short:
+/// a message in it stays until the login goes.
+fn log_messages(channel: &str, marked: Vec<Message>) {
+    let Some(file) = log_file(channel) else {
+        return;
+    };
+    let mut all: std::collections::BTreeMap<u64, Message> = logged(channel)
+        .into_iter()
+        .map(|message| (message.order(), message))
+        .collect();
+    for message in marked {
+        let order = message.order();
+        // A message the log has as deleted stays so, and keeps the versions
+        // it had, when what comes isn't more.
+        let known = all
+            .get(&order)
+            .map(|known| (known.deleted, known.history.clone()));
+        match known {
+            Some((true, _)) if !message.deleted => {}
+            Some((_, history)) if message.history.len() < history.len() => {
+                all.insert(order, Message { history, ..message });
+            }
+            _ => {
+                all.insert(order, message);
+            }
+        }
+    }
+    if let Err(error) = write_sealed(&file, &all.into_values().collect::<Vec<_>>()) {
+        tracing::warn!(%error, "could not save a Discord channel's message log");
+    }
+}
+
+/// Keeps a channel's newest [`CHANNEL_MESSAGES`] messages, oldest first, and
+/// logs the ones among `messages` that the logger holds, whatever their age.
+/// It writes to disk, so the async side calls it off its threads.
 pub fn save_messages(channel: &str, messages: Vec<Message>) {
     let Some(file) = channel_file(channel) else {
         return;
     };
+    let marked: Vec<Message> = messages
+        .iter()
+        .filter(|message| crate::logger::is_logged(message))
+        .cloned()
+        .collect();
+    if !marked.is_empty() {
+        log_messages(channel, marked);
+    }
     let newest = &messages[messages.len().saturating_sub(CHANNEL_MESSAGES)..];
     let written = write_sealed(&file, &newest);
     if let Err(error) = written {
@@ -1066,6 +1138,7 @@ pub fn forget() {
         gifs(),
         gif_home(),
         messages_directory(),
+        log_directory(),
         profiles_directory(),
         videos(),
     ]

@@ -508,7 +508,58 @@ impl OpenChannel {
                 }
             }
         }
+        self.restore_logged();
         self.join();
+    }
+
+    /// Brings back, among the messages loaded, those the message log holds of
+    /// this channel: deleted ones where they were, and an edited message's
+    /// earlier versions. A message older than what is loaded comes back when
+    /// earlier ones load.
+    fn restore_logged(&mut self) {
+        let (deleted, edits) = (
+            yapfast_discord::logger::shows_deleted(),
+            yapfast_discord::logger::shows_edits(),
+        );
+        if !(deleted || edits) {
+            return;
+        }
+        let logged = yapfast_discord::cache::logged(&self.channel);
+        if logged.is_empty() {
+            return;
+        }
+        let mut changed = Vec::new();
+        for run in std::iter::once(&mut self.shown).chain(self.latest.as_mut()) {
+            let (Some(&first), Some(&last)) = (
+                run.messages.keys().next(),
+                run.messages.keys().next_back(),
+            ) else {
+                continue;
+            };
+            for message in &logged {
+                let order = message.order();
+                if order < first || order > last {
+                    continue;
+                }
+                match run.messages.get_mut(&order) {
+                    Some(known) => {
+                        if edits && known.history.is_empty() && !message.history.is_empty() {
+                            known.history = message.history.clone();
+                            changed.push(order);
+                        }
+                    }
+                    None if message.deleted && deleted => {
+                        run.messages.insert(order, message.clone());
+                        changed.push(order);
+                    }
+                    None => {}
+                }
+            }
+        }
+        for order in changed {
+            self.rendered.remove(&order);
+            self.dirty = true;
+        }
     }
 
     /// Once the window reaches the newest messages kept, they show with it.
@@ -571,7 +622,18 @@ impl OpenChannel {
         let skip = kept()
             .count()
             .saturating_sub(yapfast_discord::cache::CHANNEL_MESSAGES);
-        Some((self.channel.clone(), kept().skip(skip).cloned().collect()))
+        // The newest, and every logged one, which the cache sends on to the
+        // message log, however old.
+        Some((
+            self.channel.clone(),
+            kept()
+                .enumerate()
+                .filter(|(index, message)| {
+                    *index >= skip || yapfast_discord::logger::is_logged(message)
+                })
+                .map(|(_, message)| message.clone())
+                .collect(),
+        ))
     }
 
     /// Hides the ephemeral message `item` for good, as Discord's "Dismiss

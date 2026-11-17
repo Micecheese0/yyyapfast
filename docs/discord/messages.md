@@ -1001,11 +1001,19 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   unless this is on.
 - What's kept is what Yapfast holds: the open channels' messages and the
   newest of those shown lately. A page of history never brings a deleted
-  message back, and `Run::fit` leaves a kept one be. These marks are in
-  the encrypted `discord-messages/` cache with the messages, so they are
-  there after a restart, within its limits. Messages of channels Yapfast
-  isn't holding aren't cached for this, to keep memory down, and the plugin's
-  log window, whitelists and ignored channels aren't ported.
+  message back, and `Run::fit` leaves a kept one be.
+- Every kept deleted message, and every edited message's earlier versions, go
+  to `discord-message-log/`, one encrypted file per channel
+  (`cache::save_messages`, which `take_changes` feeds with every logged
+  message, however old). It has no limit and nothing prunes it: it goes only
+  with the login, unlike `discord-messages/`, which keeps each channel's
+  newest 100 messages for the 300 channels used last. When a page of history
+  loads, `OpenChannel::restore_logged` puts back the logged messages that fall
+  among the loaded ones, so an old deleted message shows when you scroll to
+  where it was. The switches decide what is logged as it happens, and what shows.
+- Messages of channels Yapfast isn't holding aren't logged, to keep memory
+  down, and the plugin's log window, whitelists and ignored channels aren't
+  ported.
 
 ## Mark Unread and message links
 
