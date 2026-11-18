@@ -241,6 +241,39 @@ Yapfast is back, rather than showing an error.
   without Nitro is still 10 MiB, but `getMaxFileSize` raises every limit to
   at least 20 MiB (`Math.max(0x1400000, …)`) before it checks a file or names
   the limit, so 20 MB is what it enforces.
+- Three switches in Settings → Messages, each off until turned on, let any
+  account use what Discord keeps for Nitro. They are in `Bypass`
+  (`chat.rs`), which `Action::SetBypass` gives the application and the
+  adapter keeps in its layout file. They change only what Yapfast sends:
+  people on other clients see ordinary messages, and Discord may stop taking
+  what they rely on.
+  - *Use emoji from any server.* The emoji picker lists every emoji as usable
+    (`emoji_sets_with`), and sending turns `:name:` into `<:name:id>` only
+    for the emoji Discord itself accepts there (`native_emoji`). The others
+    become the address of their picture, which Discord shows as the picture
+    in the message (`chat::link_emoji`). Reactions are not changed.
+  - *Use stickers from any server.* The sticker picker lists every sticker as
+    usable (`StickerPicker::listed_with`). One this account may not send is
+    sent by `DiscordCommand::SendStickerPicture`, which downloads the
+    sticker's picture in full size (`ready::sticker_file`) and sends it as a
+    file in a message of its own. A Lottie sticker is not a picture, so it
+    gives a notice instead.
+  - *Send large videos as clips.* Discord takes a clip up to 100 MB
+    (`api::CLIP_LIMIT`) from any account. A staged MP4, M4V or MOV larger
+    than the room's file limit, up to that, is a clip
+    (`AppState::goes_as_clip`, `OutgoingFile::clip`); *Send every video as a
+    clip* makes a smaller one a clip too. A clip is a file Discord's servers
+    read as MP4 ending in the clip mark: when it goes, `api::make_clip`
+    rewrites the video as ffmpeg's `-c copy -movflags +faststart -brand
+    isom/avc1 -map_metadata -1` does (`api::normalize_mp4`: an `isom` file
+    type box, the `moov` index before the `mdat`, chunk offsets moved with it,
+    no `udta` or `meta` tags; a fragmented file is left as it is) and ends it
+    with the mark (`api::mark_clip`). Its upload asks
+    `is_clip: true`, and its attachment in the message carries `is_clip`,
+    `clip_created_at`, `clip_participant_ids` and `application_id`, as a
+    clip recorded by Discord does. It goes under an `.mp4` name. Other kinds
+    of file, and forum posts, are not clips yet: a WebM, an MKV, audio or an
+    archive would first need its video remuxed into an MP4.
 - Link previews and bots' cards show from the embeds Discord adds to a
   message: Discord's servers read the linked page's Open Graph tags, often a
   moment after sending, and the preview arrives in a message update. A card
@@ -850,6 +883,21 @@ share the window: its left edge drags it wider, and each tab fits what it shows
 to that width. Discord finds GIFs through Klipy, and Yapfast asks Discord as
 its desktop client does:
 
+- *Find GIFs on Tenor* in Settings → Messages, off until turned on, takes the
+  picker's GIFs from Tenor's website instead (`yapfast-discord/src/tenor.rs`;
+  `Action::SetTenorGifs`, and `gifs::use_tenor`, which the services read).
+  Tenor's API needs a key, so the pages are read as they are served, as the
+  BringBackTenor plugin for BetterDiscord does: `/` for the trending GIFs
+  and the home's GIF, `/explore` for its terms, `/search/{words}-gifs` for a
+  search. Each result is a `<figure class="UniversalGifListItem">` with its
+  page, `/view/…`, which a message sends and Discord shows as the GIF, and its
+  pictures; the small animated WebP is the tile. These requests go to
+  tenor.com without the account's token (`Api::tenor_page`), nothing goes
+  to Discord for them, and no search suggestions or `/gifs/select` reports
+  are made. The home isn't kept on disk, and switching drops what the picker
+  holds. Favourites are the account's own and are keyed by page, so Tenor's
+  and Klipy's mix there. Tenor can change its pages without notice, which
+  would leave the picker empty until the parser follows.
 - The home is `GET /gifs/trending?media_format=tinywebp&locale=en-US`:
   trending terms, each with a picture, and one trending GIF. It shows a
   Favorites tile, a "Trending GIFs" tile and the terms, 110px tall, two to a
@@ -930,6 +978,116 @@ its desktop client does:
 
   The picture downloads to disk as it comes, so a full-size GIF of tens of
   megabytes takes no memory, and the thumbnail plays from its file.
+
+## Deleted and edited messages
+
+A port of the MessageLoggerV2 plugin for BetterDiscord, in Settings →
+Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
+`Action::SetLogging`, and `logger::set`, which the channel code reads):
+
+- *Keep deleted messages*: `MESSAGE_DELETE` and `MESSAGE_DELETE_BULK` leave a
+  message the channel holds in place, marked `Message::deleted` instead of
+  removed (`change` in `discord_text/open_channel.rs`). It shows with its
+  text in a light red tint, and a deleted message that mentioned the
+  account stays highlighted, which is what the plugin calls a ghost ping. A
+  message the account deletes itself goes as usual.
+- *Keep edit history*: an update that changes a message's content pushes what
+  it said onto `Message::history`, up to ten versions, shown quoted above it.
+- *Keep bots' messages too*: bots' and webhooks' messages are left out
+  unless this is on.
+- What's kept is what Yapfast holds: the open channels' messages and the
+  newest of those shown lately. A page of history never brings a deleted
+  message back, and `Run::fit` leaves a kept one be.
+- The log is the `MsgLogData` folder of Yapfast's data folder
+  (`yapfast-discord/src/msglog.rs`), plain files that no login owns: they
+  aren't encrypted with the credential store's key, which a password reset
+  could lose, and unlinking an account leaves them be. `Session::event`
+  writes it for every channel the account gets messages of, not only the
+  open one, and holds nothing in memory: `messages/{channel}.jsonl` has a
+  line for each message that came, edit and deletion, and `media/images`,
+  `media/gifs` and `media/videos` hold the pictures, GIFs and videos
+  attached, as `{channel}/{message}-{n}-{name}`. A file larger than the
+  largest the settings allow for its kind, or when the folder switch is off,
+  isn't downloaded. It has no limit on the whole and nothing prunes it,
+  unlike `discord-messages/`, which keeps each channel's newest 100 messages
+  for the 300 channels used last.
+- Settings → Message Logger has the switches above, *Save messages and media*,
+  which writes every message and its files, and the largest picture, GIF and
+  video to save: 5, 25, 100 or 500 MB, or no limit (`Action::SetLogging`,
+  `msglog::set`). *Keep deleted messages* and *Keep edit history* write
+  messages, without media, too, so what they keep survives a restart.
+- When a page of history loads, `OpenChannel::restore_logged` reads the
+  channel's file (`msglog::logged`, which folds its lines, two passes, so the
+  messages that stay as they were aren't read in full) and puts back the
+  deleted messages and edited messages' earlier versions that fall among the
+  loaded ones, so an old deleted message shows when you scroll to where it
+  was.
+- A deleted message's files show in the timeline from the folder, as Discord's
+  copy goes with the message. `msglog::local_url` gives a saved attachment's
+  `file://` address; `OpenChannel::publish` takes a deleted picture's preview
+  from it (`render::preview` decodes it where it lies, and
+  `msglog::local_path` names only files inside `MsgLogData`), and the viewer,
+  Save and Copy read it too (`OpenChannel::saved`). `logger::shown_content`
+  ends a deleted message with `Saved copy: ` and each saved file's path, which
+  shows in the timeline and the log window alike. A video or other file
+  isn't played or opened from the folder: the line says where it is.
+- The message log window is the clock button at the right of a channel's
+  header, beside the pins and the member list (`Action::ShowMessageLog`;
+  `Event::Log` and `log_view` in `crates/yapfast-iced/src/header_popovers.rs`,
+  built like the pins popover, its entries `found::found_card`s). Its tabs list,
+  latest first, the channel's *Deleted* messages, *Ghost pings* (deleted
+  messages that mentioned the account or @everyone), *Edited* messages, with
+  what each said before quoted above it, *Mass deletions*, which came in a
+  `MESSAGE_DELETE_BULK`, and *Media*, every message the log saved a picture,
+  GIF or video of, deleted or not (`msglog::entries_with_media`, which finds
+  them by the files' names in `media/*/{channel}/`). `DiscordCommand::MessageLog` reads the channel's file
+  (`msglog::entries`) and builds each as a pinned message is built; its first
+  pictures come from the files the log saved (`discord_text/message_log.rs`,
+  decoded where they are), or from Discord when the log has none.
+- A click on an entry, or its *Jump* button, closes the window and shows the
+  message in its channel (`Action::JumpInRoom`, with `LogEntry::room`). A
+  deleted message comes back in place where the channel loads around it, as
+  `restore_logged` puts back the ones among the loaded messages, so it needs
+  *Keep deleted messages* on. An entry of a channel that was deleted has no
+  room, so no button.
+- The window lists the newest first, and a click on *Newest first* under its
+  tabs swaps it to the oldest first (`Action::ToggleLogOrder`,
+  `MessageLog::shown` sorts by the message's time). A server's menu has *Open
+  logs for server*, above *Copy link*, which opens the same window for every
+  channel of the server (`DiscordCommand::ServerLog`, which reads the files of
+  the channels and threads the snapshot lists, and those the index below has
+  of the server, so a channel it lost is in it). A channel's name goes above
+  each message whenever the list holds messages of more than one channel.
+- The window lists the newest 1000 of each channel (`chat::LOG_PAGE`,
+  `msglog::entries_newest`, which a purged channel's thousands of messages
+  would otherwise all load). When the log holds more, a *Load more messages*
+  button ends the list, and a click asks for another 1000 of each channel
+  (`Action::ShowMoreLog`, `MessageLog::most`): `Event::MessageLog` says
+  whether `more` remain, and the list stays as it is until the longer one
+  comes.
+- A deleted channel or server takes its messages with it, though Discord sends
+  no deletion for each: on CHANNEL_DELETE, or a GUILD_DELETE without
+  `unavailable` (a server deleted, or one the account left or was removed
+  from), `Session::event` appends a `{"t":"x"}` line to the files of its
+  channels and threads (`msglog::gone`), and `msglog::entries` reads every
+  message before such a line as deleted. Messages that come after it, if the
+  server is back, aren't. `MsgLogData/places.json` is the index that says which server each
+  logged channel is in and what both were called, since a file's name says
+  neither and Discord lists neither once they're gone: `msglog::place` writes
+  a channel's entry with its first logged message, and CHANNEL_UPDATE and
+  GUILD_UPDATE rename it. Settings → Message Logger has *Open logs of deleted
+  servers and channels* (`Action::OpenDeletedLog`, `DiscordCommand::DeletedLog`),
+  the window for every channel the index marks gone, headed with its server's
+  name and its own. A channel logged before the index existed is named by
+  its id until a message of it comes.
+- Which servers and channels are logged is a list in `MsgLogData/rules.json`:
+  Settings → Message Logger chooses whether the log keeps all but the ones listed
+  or only the ones listed, and a server's or channel's context menu has *Log
+  this channel*, *Don't log this channel* or the like for its mode, which adds
+  it to the list or takes it off (`Action::ToggleLogged`,
+  `msglog::toggle_listed`). A server on the list covers its channels. As the
+  log is written at the gateway, a listed channel is logged without being
+  open.
 
 ## Mark Unread and message links
 

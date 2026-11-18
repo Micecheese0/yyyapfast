@@ -35,6 +35,8 @@ pub(super) struct PendingFile {
     name: String,
     size: u64,
     spoiler: bool,
+    /// Goes as a clip, which Discord takes larger.
+    clip: bool,
 }
 
 /// Messages loaded with no gap between them, and what's known of what's
@@ -108,7 +110,11 @@ impl Run {
         // Discord's history never has an answer only this account sees, so
         // one stays until it's dismissed or the app closes.
         self.messages.retain(|order, message| {
-            *order < since || *order > until || listed.contains(order) || message.ephemeral
+            *order < since
+                || *order > until
+                || listed.contains(order)
+                || message.ephemeral
+                || message.deleted
         });
     }
 
@@ -502,7 +508,58 @@ impl OpenChannel {
                 }
             }
         }
+        self.restore_logged();
         self.join();
+    }
+
+    /// Brings back, among the messages loaded, those the message log holds of
+    /// this channel: deleted ones where they were, and an edited message's
+    /// earlier versions. A message older than what is loaded comes back when
+    /// earlier ones load.
+    fn restore_logged(&mut self) {
+        let (deleted, edits) = (
+            yapfast_discord::logger::shows_deleted(),
+            yapfast_discord::logger::shows_edits(),
+        );
+        if !(deleted || edits) {
+            return;
+        }
+        let logged = yapfast_discord::msglog::logged(&self.channel);
+        if logged.is_empty() {
+            return;
+        }
+        let mut changed = Vec::new();
+        for run in std::iter::once(&mut self.shown).chain(self.latest.as_mut()) {
+            let (Some(&first), Some(&last)) = (
+                run.messages.keys().next(),
+                run.messages.keys().next_back(),
+            ) else {
+                continue;
+            };
+            for message in &logged {
+                let order = message.order();
+                if order < first || order > last {
+                    continue;
+                }
+                match run.messages.get_mut(&order) {
+                    Some(known) => {
+                        if edits && known.history.is_empty() && !message.history.is_empty() {
+                            known.history = message.history.clone();
+                            changed.push(order);
+                        }
+                    }
+                    None if message.deleted && deleted => {
+                        run.messages.insert(order, message.clone());
+                        changed.push(order);
+                    }
+                    None => {}
+                }
+            }
+        }
+        for order in changed {
+            self.rendered.remove(&order);
+            self.dirty = true;
+        }
     }
 
     /// Once the window reaches the newest messages kept, they show with it.
@@ -600,6 +657,8 @@ impl OpenChannel {
         if let Some(nonce) = &message.nonce {
             self.pending.retain(|pending| &pending.nonce != nonce);
         }
+        let mut message = message;
+        carry_history(self.shown.messages.get(&message.order()), &mut message);
         self.rendered.remove(&message.order());
         self.shown.messages.insert(message.order(), message);
     }
@@ -722,7 +781,7 @@ impl OpenChannel {
         }
         let files = files
             .into_iter()
-            .map(|OutgoingFile { path, spoiler }| {
+            .map(|OutgoingFile { path, spoiler, clip }| {
                 let metadata =
                     std::fs::metadata(&path).map_err(|_| "Yapfast could not read a file.")?;
                 let name = path
@@ -735,6 +794,7 @@ impl OpenChannel {
                     name,
                     size: metadata.len(),
                     spoiler,
+                    clip,
                 })
             })
             .collect::<Result<Vec<_>, &'static str>>()?;
@@ -792,15 +852,27 @@ impl OpenChannel {
         let files: Vec<_> = pending
             .files
             .iter()
-            .map(|file| (file.path.clone(), file.name.clone(), file.spoiler))
+            .map(|file| (file.path.clone(), file.name.clone(), file.spoiler, file.clip))
             .collect();
         tokio::spawn(async move {
             let result = async {
                 let mut read = Vec::with_capacity(files.len());
-                for (path, name, spoiler) in files {
+                for (path, name, spoiler, clip) in files {
                     let data = tokio::fs::read(&path)
                         .await
                         .map_err(|_| format!("Yapfast could not read {name}."))?;
+                    let (name, data) = if clip {
+                        // Rewriting a video of up to 100 MB isn't for the
+                        // thread that runs the application.
+                        let data = tokio::task::spawn_blocking(move || {
+                            yapfast_discord::api::make_clip(data)
+                        })
+                        .await
+                        .map_err(|_| format!("Yapfast could not prepare {name}."))?;
+                        (clip_name(&name), data)
+                    } else {
+                        (name, data)
+                    };
                     read.push((upload_name(&name, spoiler), data));
                 }
                 let sending = yapfast_discord::api::Sending {
@@ -1218,9 +1290,10 @@ impl OpenChannel {
                 .insert(url.clone(), picture.clone());
         }
         for (order, message) in &self.shown.messages {
-            if message.attachments.iter().any(|attachment| {
+            if message.attachments.iter().enumerate().any(|(index, attachment)| {
                 attachment.preview_url.as_ref() == Some(&url)
                     || attachment.still_url.as_ref() == Some(&url)
+                    || saved_picture(message, index).as_ref() == Some(&url)
             }) {
                 self.rendered.remove(order);
             }
@@ -1239,13 +1312,25 @@ impl OpenChannel {
             return false;
         }
         self.visible = visible;
-        let urls: HashSet<_> = self
+        let urls: HashSet<String> = self
             .shown
             .messages
             .iter()
             .filter(|(order, _)| self.visible.contains(order))
-            .flat_map(|(_, message)| &message.attachments)
-            .flat_map(|attachment| attachment.preview_url.iter().chain(&attachment.still_url))
+            .flat_map(|(_, message)| {
+                message
+                    .attachments
+                    .iter()
+                    .enumerate()
+                    .flat_map(move |(index, attachment)| {
+                        attachment
+                            .preview_url
+                            .iter()
+                            .chain(&attachment.still_url)
+                            .cloned()
+                            .chain(saved_picture(message, index))
+                    })
+            })
             .collect();
         self.pictures.retain(|url, _| urls.contains(url));
         self.requested.retain(|url| urls.contains(url));
@@ -1257,7 +1342,7 @@ impl OpenChannel {
             !shown.get(order).is_some_and(|message| {
                 message.attachments.iter().any(|attachment| {
                     attachment.preview_url.is_some() || attachment.still_url.is_some()
-                })
+                }) || (message.deleted && !message.attachments.is_empty())
             })
         });
         true
@@ -1369,6 +1454,16 @@ impl OpenChannel {
             .and_then(|message| message.attachments.get(index))
     }
 
+    /// The address of the file the message log saved of a deleted message's
+    /// attachment at `index`, which Discord no longer has.
+    fn saved(&self, item: &str, index: usize) -> Option<String> {
+        let message = sent_id(item).and_then(|id| self.message(id.parse().unwrap_or_default()))?;
+        message
+            .deleted
+            .then(|| yapfast_discord::msglog::local_url(message, index))
+            .flatten()
+    }
+
     pub fn save(
         &mut self,
         discord: &Discord,
@@ -1383,7 +1478,10 @@ impl OpenChannel {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         let room = self.room.clone();
-        let Some(url) = attachment.map(|attachment| attachment.url.clone()) else {
+        let Some(url) = self
+            .saved(item, index)
+            .or_else(|| attachment.map(|attachment| attachment.url.to_string()))
+        else {
             let _ = done.send(Done::Saved {
                 room,
                 name,
@@ -1413,12 +1511,14 @@ impl OpenChannel {
         index: usize,
     ) {
         let room = self.room.clone();
-        let Some(url) = self.attachment(item, index).map(|attachment| {
-            attachment
-                .still_url
-                .as_deref()
-                .unwrap_or(&attachment.url)
-                .to_owned()
+        let Some(url) = self.saved(item, index).or_else(|| {
+            self.attachment(item, index).map(|attachment| {
+                attachment
+                    .still_url
+                    .as_deref()
+                    .unwrap_or(&attachment.url)
+                    .to_owned()
+            })
         }) else {
             let _ = done.send(Done::Copied {
                 room,
@@ -1446,6 +1546,34 @@ impl OpenChannel {
         index: usize,
     ) {
         let room = self.room.clone();
+        // A deleted message's picture the log saved opens from disk.
+        if let Some(file) = self
+            .saved(&item, index)
+            .and_then(|url| yapfast_discord::msglog::local_path(&url))
+        {
+            let done = done.clone();
+            self.tasks.spawn(async move {
+                let picture = tokio::task::spawn_blocking(move || {
+                    crate::chat::decode_picture_at(
+                        &file,
+                        crate::chat::VIEW_WIDTH,
+                        crate::chat::VIEW_HEIGHT,
+                    )
+                })
+                .await
+                .ok()
+                .flatten()
+                .map(Arc::new)
+                .ok_or("Yapfast can't show this image. Save it to open it elsewhere.");
+                let _ = done.send(Done::Image {
+                    room,
+                    item,
+                    index,
+                    picture,
+                });
+            });
+            return;
+        }
         let Some(url) = self
             .attachment(&item, index)
             .and_then(|attachment| attachment.view_url.clone())
@@ -1667,7 +1795,11 @@ impl OpenChannel {
         let author = name(&message.author_id, &message.author);
         let marks = server.map(|server| &*server.marks);
         let server = server.map(|server| &*server.server);
-        let (body, mentions) = rendered(discord, server, &message.content);
+        let (body, mentions) = rendered(
+            discord,
+            server,
+            &yapfast_discord::logger::shown_content(message),
+        );
         let body = match &message.system {
             Some(system) => system_body(&author, system),
             None => body,
@@ -1675,7 +1807,16 @@ impl OpenChannel {
         let attachments = message
             .attachments
             .iter()
-            .map(|attachment| {
+            .enumerate()
+            .map(|(index, attachment)| {
+                // A deleted message's file the log saved shows, and opens,
+                // from disk: Discord's copy goes with the message.
+                let saved = message
+                    .deleted
+                    .then(|| yapfast_discord::msglog::local_url(message, index))
+                    .flatten();
+                let saved_picture = saved_picture(message, index);
+                let preview_url = saved_picture.as_ref().or(attachment.preview_url.as_ref());
                 let mut preview_of = |url: &String| match self.pictures.get(url) {
                     Some(picture) => Some(picture.clone()),
                     None => {
@@ -1694,7 +1835,7 @@ impl OpenChannel {
                         None
                     }
                 };
-                let mut preview = attachment.preview_url.as_ref().and_then(&mut preview_of);
+                let mut preview = preview_url.and_then(&mut preview_of);
                 // A GIF's video that can't be shown gives way to its picture.
                 if matches!(preview, Some(None))
                     && let Some(still) = &attachment.still_url
@@ -1704,7 +1845,7 @@ impl OpenChannel {
                 Attachment {
                     name: attachment.name.clone(),
                     size: attachment.size,
-                    image: attachment.image && attachment.preview_url.is_some(),
+                    image: attachment.image && preview_url.is_some(),
                     dimensions: attachment.dimensions,
                     preview_failed: matches!(preview, Some(None)),
                     preview: preview.flatten(),
@@ -1718,12 +1859,13 @@ impl OpenChannel {
                     spoiler: attachment.spoiler,
                     video: attachment.video_url.is_some(),
                     gif: super::gifs::favorite_gif(attachment),
-                    url: Some(
-                        attachment
+                    url: Some(match saved {
+                        Some(saved) => saved.into(),
+                        None => attachment
                             .link_url
                             .clone()
                             .unwrap_or_else(|| attachment.url.clone()),
-                    ),
+                    }),
                     description: attachment.description.clone(),
                 }
             })
@@ -1805,7 +1947,7 @@ impl OpenChannel {
             timestamp,
             own,
             edited: message.edited,
-            deleted: false,
+            deleted: message.deleted,
             blocked: snapshot.blocked.contains(&message.author_id),
             mentions_me: message.names_me(me, marks),
             replies_to_me: message.replies_to(me),
@@ -1959,6 +2101,36 @@ pub(super) fn upload_name(name: &str, spoiler: bool) -> String {
 
 const SPOILER: &str = "SPOILER_";
 
+/// The name a clip goes under: Discord reads a clip as MP4, whatever its video
+/// came as.
+fn clip_name(name: &str) -> String {
+    let stem = std::path::Path::new(name)
+        .file_stem()
+        .map_or_else(|| name.to_owned(), |stem| stem.to_string_lossy().into_owned());
+    format!("{stem}.mp4")
+}
+
+/// Gives `new`, a message that came again, the earlier versions of itself that
+/// `old`, which Yapfast already held, kept: Discord's history doesn't say them.
+fn carry_history(old: Option<&Message>, new: &mut Message) {
+    if let Some(old) = old
+        && new.history.is_empty()
+        && new.edited
+        && !old.history.is_empty()
+    {
+        new.history = old.history.clone();
+    }
+}
+
+/// The address a deleted message's picture at `index` shows from: the file the
+/// message log saved of it, if it did.
+fn saved_picture(message: &Message, index: usize) -> Option<String> {
+    let attachment = message.attachments.get(index)?;
+    (message.deleted && attachment.image && attachment.video_url.is_none())
+        .then(|| yapfast_discord::msglog::local_url(message, index))
+        .flatten()
+}
+
 /// Applies an edit, a deletion or a reaction in `channel` to the messages
 /// it changes; the snowflake of the one it changed, if any.
 fn change(messages: &mut BTreeMap<u64, Message>, channel: &str, event: &Live) -> Option<u64> {
@@ -1977,10 +2149,14 @@ fn change(messages: &mut BTreeMap<u64, Message>, channel: &str, event: &Live) ->
                 Some(poll) if !poll.counted => known.poll.take(),
                 poll => poll.clone(),
             };
+            let history = yapfast_discord::logger::history_after_edit(known, message);
+            let deleted = known.deleted;
             *known = Message {
                 reactions,
                 poll,
                 reply,
+                history,
+                deleted,
                 ..message.clone()
             };
             Some(message.order())
@@ -2001,6 +2177,14 @@ fn change(messages: &mut BTreeMap<u64, Message>, channel: &str, event: &Live) ->
             id: message,
         } if id == channel => {
             let order = message.parse().unwrap_or_default();
+            // A message the logger keeps stays, marked, where it was.
+            if let Some(kept) = messages
+                .get_mut(&order)
+                .filter(|kept| yapfast_discord::logger::keeps_deleted(kept))
+            {
+                kept.deleted = true;
+                return Some(order);
+            }
             messages.remove(&order).map(|_| order)
         }
         Live::Reaction {

@@ -17,6 +17,47 @@ use crate::{
 pub(super) const DATE_FORMATS: [&str; 3] = ["Day/Month/Year", "Month/Day/Year", "Year-Month-Day"];
 
 impl<'a> Page<'a> {
+    /// What Yapfast sends in place of what Discord asks Nitro for, and the
+    /// GIF picker's Tenor: each off until turned on.
+    fn nitro_switches(self) -> Vec<Element<'a, Message>> {
+        let prefs = &self.cx.layout.prefs;
+        let mut switches = vec![
+            self.flip(
+                "Free emoji",
+                "Emoji from any server go as links to their pictures, which Discord shows as the pictures. Only what Yapfast sends: people on other clients see ordinary messages.",
+                prefs.free_emoji,
+                Pref::FreeEmoji,
+            ),
+            self.flip(
+                "Free stickers",
+                "Stickers from any server go as their pictures, where Discord refuses them. Animated Lottie stickers only go as stickers.",
+                prefs.free_stickers,
+                Pref::FreeStickers,
+            ),
+            self.flip(
+                "Send large videos as clips",
+                "An MP4 or MOV video over your file limit, up to 100 MB, goes as a clip, which Discord allows without Nitro.",
+                prefs.clip_bypass,
+                Pref::ClipBypass,
+            ),
+            self.flip(
+                "Find GIFs on Tenor",
+                "The GIF picker searches Tenor's website instead of Discord's picker, which uses Klipy now. A GIF goes as its Tenor link. Yapfast asks tenor.com without your Discord login.",
+                prefs.tenor_gifs,
+                Pref::TenorGifs,
+            ),
+        ];
+        if prefs.clip_bypass {
+            switches.push(self.flip(
+                "Send every video as a clip",
+                "Also sends MP4 and MOV videos under your file limit as clips, which show as clips in the chat.",
+                prefs.force_clip,
+                Pref::ForceClip,
+            ));
+        }
+        switches
+    }
+
     pub(in crate::settings) fn messages_page(self) -> Element<'a, Message> {
         let theme = self.cx.look.theme;
         let prefs = &self.cx.layout.prefs;
@@ -145,6 +186,9 @@ impl<'a> Page<'a> {
                 prefs.strip_tracking.unwrap_or(true),
                 Pref::StripTracking,
             ),
-        ])
+        ]
+        .into_iter()
+        .chain(self.linked().then(|| self.nitro_switches()).into_iter().flatten())
+        .collect::<Vec<_>>())
     }
 }

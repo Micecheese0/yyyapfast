@@ -163,6 +163,10 @@ fn place_menu(
                     crate::person_menu::submenu(core, &mut row, choice, person, Some(id), None);
                 }
                 MenuChoice::Unmute => row.act = MenuAct::MuteDm(Muting::Off),
+                // What the message log's list does with it, in its mode.
+                MenuChoice::LogPlace => {
+                    row.label = log_place_label(state, id, server).into();
+                }
                 _ => {}
             }
             row
@@ -303,6 +307,13 @@ pub fn choose_place(app: &mut App, place: String, choice: MenuChoice) -> Task<Me
             join: choice == MenuChoice::JoinThread,
             location: "Context Menu",
         },
+        MenuChoice::OpenServerLog => Action::OpenServerLog(place),
+        MenuChoice::LogPlace => {
+            let Some(id) = app.client.state().log_place_id(&place) else {
+                return Task::none();
+            };
+            Action::ToggleLogged(id)
+        }
         MenuChoice::CopyLink => return iced::clipboard::write(network_link(&place)),
         MenuChoice::CopyId => return iced::clipboard::write(network_id(&place).to_owned()),
         // The rest of a DM's are about its person, as their own menu.
@@ -609,7 +620,9 @@ pub fn group_of(choice: MenuChoice) -> u8 {
         | MenuChoice::ServerNotifications
         | MenuChoice::ShowAllChannels
         | MenuChoice::HideMuted => 2,
-        MenuChoice::CopyLink
+        MenuChoice::OpenServerLog
+        | MenuChoice::LogPlace
+        | MenuChoice::CopyLink
         | MenuChoice::CopyId
         | MenuChoice::JoinThread
         | MenuChoice::LeaveThread
@@ -672,6 +685,7 @@ pub fn icon(choice: MenuChoice) -> Icon {
         C::Unmute | C::ChannelNotifications | C::UnmuteServer | C::ServerNotifications => {
             Icon::Bell
         }
+        C::OpenServerLog | C::LogPlace => Icon::History,
         C::CopyLink => Icon::Copy,
         C::CopyId => Icon::Id,
         C::Mention => Icon::AtSign,
@@ -691,6 +705,18 @@ pub fn icon(choice: MenuChoice) -> Icon {
         C::DuplicateChannel => Icon::CopyPlus,
         C::DeleteChannel => Icon::Trash,
         C::JoinThread => Icon::Thread,
+    }
+}
+
+/// What the message log's row says of the server or channel `id`: as the
+/// list works in the log's mode, to keep it, to leave it out, or to undo that.
+fn log_place_label(state: &yapfast_core::application::AppState, id: &str, server: bool) -> String {
+    let place = if server { "server" } else { "channel" };
+    match (state.log_whitelist, state.log_place_listed(id)) {
+        (true, false) => format!("Log this {place}"),
+        (true, true) => format!("Stop logging this {place}"),
+        (false, false) => format!("Don't log this {place}"),
+        (false, true) => format!("Log this {place} again"),
     }
 }
 
@@ -722,6 +748,8 @@ pub fn label(choice: MenuChoice) -> &'static str {
         MenuChoice::Unblock => "Unblock",
         MenuChoice::Mute => "Mute",
         MenuChoice::Unmute => "Unmute",
+        MenuChoice::OpenServerLog => "Open logs for server",
+        MenuChoice::LogPlace => "Message log",
         MenuChoice::CopyLink => "Copy link",
         MenuChoice::CopyId => "Copy ID",
         MenuChoice::Mention => "Mention",

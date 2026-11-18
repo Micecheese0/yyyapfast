@@ -261,6 +261,56 @@ pub struct Pins {
     pub messages: Option<Result<Vec<ChatMessage>, String>>,
 }
 
+/// The message log window of a channel, while it's open.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MessageLog {
+    /// The channel's room id, or for a server's log the server's id.
+    pub room: String,
+    /// It lists a whole server's channels, and shows wherever it was opened.
+    pub server: bool,
+    /// It lists the channels and servers that were deleted, of every server.
+    pub gone: bool,
+    /// The oldest first, rather than the newest.
+    pub oldest_first: bool,
+    /// The tab: 0 deleted, 1 ghost pings, 2 edited, 3 mass deletions, 4 media.
+    pub tab: usize,
+    /// The channel's logged messages, the latest first; `None` while they're
+    /// on their way.
+    pub entries: Option<Result<Vec<chat::LogEntry>, String>>,
+    /// The most messages of each channel it asks for, which *Load more* raises.
+    pub most: usize,
+    /// The log holds more than `entries` has.
+    pub more: bool,
+    /// More were asked for, and are on their way.
+    pub loading_more: bool,
+}
+
+impl MessageLog {
+    /// The entries the tab shows.
+    pub fn shown(&self) -> Vec<&chat::LogEntry> {
+        let Some(Ok(entries)) = &self.entries else {
+            return Vec::new();
+        };
+        let mut shown: Vec<&chat::LogEntry> = entries
+            .iter()
+            .filter(|entry| match self.tab {
+                0 => entry.deleted && !entry.bulk,
+                1 => entry.ghost,
+                2 => entry.edited,
+                3 => entry.deleted && entry.bulk,
+                _ => entry.media,
+            })
+            .collect();
+        // A stable sort, so a purge's messages keep the order they came in.
+        if self.oldest_first {
+            shown.sort_by_key(|entry| entry.message.timestamp);
+        } else {
+            shown.sort_by_key(|entry| std::cmp::Reverse(entry.message.timestamp));
+        }
+        shown
+    }
+}
+
 /// A search, while its results show: of a DM, or of a whole Discord server,
 /// which stays open while its channels do.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -579,6 +629,10 @@ pub struct AppState {
     pub hide_blocked: bool,
     /// A call from someone's menu starts without asking first.
     pub skip_call_prompt: bool,
+    /// The switches that let this account use what Discord keeps for Nitro.
+    pub bypass: chat::Bypass,
+    /// The GIF picker finds GIFs on Tenor's website, not Discord's provider.
+    pub tenor_gifs: bool,
     /// The member list's Activity panel's feed, in Discord's order: what
     /// everyone this account knows is doing, not just one server.
     pub activity_feed: Arc<[crate::chat::FeedEntry]>,
@@ -738,6 +792,13 @@ pub struct AppState {
     /// The selected DM's pinned messages, a search of it, and adding friends
     /// to it, each while it's open.
     pub pins: Option<Pins>,
+    /// The open channel's message log window.
+    pub message_log: Option<MessageLog>,
+    /// The servers and channels, by id, the message log's rules list, and
+    /// whether they're the only ones it keeps rather than the only ones it
+    /// leaves out.
+    pub log_listed: Vec<String>,
+    pub log_whitelist: bool,
     pub search: Option<Search>,
     /// The open Discord channel's list of its threads.
     pub threads: Option<ThreadList>,
@@ -1891,6 +1952,27 @@ pub enum Action {
     CloseDm(String),
     /// Show the selected DM's pinned messages, or stop.
     ShowPins(bool),
+    /// Show the open channel's message log, or stop.
+    ShowMessageLog(bool),
+    /// Choose the message log window's tab: 0 deleted, 1 ghost pings, 2 edited,
+    /// 3 mass deletions.
+    SetLogTab(usize),
+    /// Show the message log of every channel of a Discord server, by its id.
+    OpenServerLog(String),
+    /// Show the message log of the channels and servers that were deleted.
+    OpenDeletedLog,
+    /// Swap the message log window between the newest first and the oldest.
+    ToggleLogOrder,
+    /// List more of what the message log window holds.
+    ShowMoreLog,
+    /// Reads the message log's rules, which the folder keeps.
+    LoadLogRules,
+    /// Adds the server or channel, by id, to the message log's list, or takes
+    /// it off.
+    ToggleLogged(String),
+    /// Sets whether the message log keeps only the servers and channels
+    /// listed, rather than all but those.
+    SetLogWhitelist(bool),
     /// The pointer went over a message's reaction, by item and key, or left
     /// it.
     HoverReaction(Option<(String, String)>),
@@ -2326,6 +2408,13 @@ pub enum Action {
     },
     /// Take tracking parameters out of links in sent messages.
     StripTracking(bool),
+    /// Sets which of Nitro's emoji, stickers and larger files any account
+    /// may use.
+    SetBypass(chat::Bypass),
+    /// Sets what the message logger keeps.
+    SetLogging(chat::Logging),
+    /// Sets whether the GIF picker finds GIFs on Tenor's website.
+    SetTenorGifs(bool),
     /// Turns nameplates off, or on again.
     HideNameplates(bool),
     /// Leave out messages from people this account blocked, rather than
@@ -3609,6 +3698,46 @@ impl Application {
             }
             Action::CloseDm(room) => self.close_dm(room),
             Action::ShowPins(shown) => self.show_pins(shown),
+            Action::ShowMessageLog(shown) => self.show_message_log(shown),
+            Action::SetLogTab(tab) => {
+                if let Some(log) = &mut self.state.message_log {
+                    log.tab = tab.min(4);
+                }
+                vec![]
+            }
+            Action::OpenServerLog(server) => self.open_server_log(server),
+            Action::OpenDeletedLog => self.open_deleted_log(),
+            Action::ShowMoreLog => self.show_more_log(),
+            Action::ToggleLogOrder => {
+                if let Some(log) = &mut self.state.message_log {
+                    log.oldest_first = !log.oldest_first;
+                }
+                vec![]
+            }
+            Action::LoadLogRules => {
+                #[cfg(feature = "discord")]
+                {
+                    self.state.log_listed = yapfast_discord::msglog::listed();
+                    self.state.log_whitelist = yapfast_discord::msglog::whitelist();
+                }
+                vec![]
+            }
+            Action::ToggleLogged(id) => {
+                #[cfg(feature = "discord")]
+                {
+                    yapfast_discord::msglog::toggle_listed(&id);
+                    self.state.log_listed = yapfast_discord::msglog::listed();
+                }
+                #[cfg(not(feature = "discord"))]
+                let _ = id;
+                vec![]
+            }
+            Action::SetLogWhitelist(on) => {
+                self.state.log_whitelist = on;
+                #[cfg(feature = "discord")]
+                yapfast_discord::msglog::set_whitelist(on);
+                vec![]
+            }
             Action::HoverReaction(hovered) => self.hover_reaction(hovered),
             Action::OpenGifs => self.open_gifs(),
             Action::OpenStickers => self.open_stickers(),
@@ -4059,6 +4188,43 @@ impl Application {
                 self.state.strip_tracking = strip;
                 vec![]
             }
+            Action::SetTenorGifs(on) => {
+                if self.state.tenor_gifs != on {
+                    self.state.tenor_gifs = on;
+                    #[cfg(feature = "discord")]
+                    yapfast_discord::gifs::use_tenor(on);
+                    // What the picker holds is the other provider's.
+                    self.state.gifs.forget_found();
+                }
+                vec![]
+            }
+            Action::SetLogging(logging) => {
+                #[cfg(feature = "discord")]
+                yapfast_discord::logger::set(yapfast_discord::logger::Options {
+                    deleted: logging.deleted,
+                    edits: logging.edits,
+                    bots: logging.bots,
+                });
+                // Messages are written for the switches that bring them back,
+                // and for the folder's own; media only for the folder's.
+                #[cfg(feature = "discord")]
+                yapfast_discord::msglog::set(yapfast_discord::msglog::Options {
+                    messages: logging.deleted || logging.edits || logging.archive,
+                    media: logging.archive,
+                    bots: logging.bots,
+                    image_mb: logging.image_mb,
+                    gif_mb: logging.gif_mb,
+                    video_mb: logging.video_mb,
+                });
+                #[cfg(not(feature = "discord"))]
+                let _ = logging;
+                vec![]
+            }
+            Action::SetBypass(bypass) => {
+                self.state.bypass = bypass;
+                self.state.stickers.bypass = bypass.stickers;
+                vec![]
+            }
             Action::HideNameplates(hide) => {
                 self.state.hide_nameplates = hide;
                 vec![]
@@ -4377,6 +4543,7 @@ impl Application {
             }
             Event::ThreadOpened { room, result } => self.thread_opened(room, result),
             Event::Pins { room, result } => self.pins_came(room, result),
+            Event::MessageLog { room, result, more } => self.message_log_came(room, result, more),
             Event::GifCategories(result) => self.gif_categories_came(result),
             Event::Gifs { query, result } => self.gifs_came(query, result),
             Event::GifSuggestions { query, terms } => self.gif_suggestions_came(query, terms),
@@ -4839,6 +5006,13 @@ impl Application {
     /// not use greyed as Discord's does; everything else uses
     /// [`Application::usable_emoji`].
     pub fn emoji_sets(&self) -> Vec<chat::EmojiSet> {
+        self.emoji_sets_with(self.state.bypass.emoji)
+    }
+
+    /// [`Self::emoji_sets`], with every emoji usable when `bypass` says so: the
+    /// emoji switch makes the others go as links to their pictures. `false`
+    /// gives what Discord itself takes as emoji.
+    fn emoji_sets_with(&self, bypass: bool) -> Vec<chat::EmojiSet> {
         #[cfg(feature = "discord")]
         if let Some(snapshot) = &self.discord {
             let here = self
@@ -4872,11 +5046,12 @@ impl Application {
                                 text: format!(":{}:", emoji.name),
                                 id: emoji.id.clone(),
                                 animated: emoji.animated,
-                                usable: if ours {
-                                    nitro || !emoji.animated
-                                } else {
-                                    external
-                                },
+                                usable: bypass
+                                    || if ours {
+                                        nitro || !emoji.animated
+                                    } else {
+                                        external
+                                    },
                                 picture: yapfast_discord::ready::custom_emoji(
                                     &emoji.id,
                                     emoji.animated,
@@ -4889,6 +5064,7 @@ impl Application {
                 .filter(|set| !set.emoji.is_empty())
                 .collect();
         }
+        let _ = bypass;
         vec![]
     }
 
@@ -4933,6 +5109,7 @@ impl Application {
                 .account
                 .as_ref()
                 .is_some_and(|account| account.premium_type > 0);
+            let bypass = self.state.bypass.emoji;
             return snapshot
                 .servers
                 .iter()
@@ -4942,7 +5119,7 @@ impl Application {
                         .emojis
                         .iter()
                         .filter(|emoji| emoji.available && ids.contains(emoji.id.as_str()))
-                        .map(move |emoji| (emoji, nitro || (ours && !emoji.animated)))
+                        .map(move |emoji| (emoji, bypass || nitro || (ours && !emoji.animated)))
                 })
                 .map(|(emoji, usable)| chat::CustomEmoji {
                     text: format!(":{}:", emoji.name),
@@ -4966,8 +5143,17 @@ impl Application {
     /// room's own server first: with Nitro every server's, and without it only
     /// that server's, none animated.
     pub fn usable_emoji(&self) -> Vec<chat::EmojiSet> {
-        self.emoji_sets()
-            .into_iter()
+        Self::only_usable(self.emoji_sets())
+    }
+
+    /// The emoji Discord takes as emoji in the selected room, whatever the emoji
+    /// switch says: the ones that go as `<:name:id>`.
+    pub(super) fn native_emoji(&self) -> Vec<chat::EmojiSet> {
+        Self::only_usable(self.emoji_sets_with(false))
+    }
+
+    fn only_usable(sets: Vec<chat::EmojiSet>) -> Vec<chat::EmojiSet> {
+        sets.into_iter()
             .map(|set| chat::EmojiSet {
                 emoji: set.emoji.into_iter().filter(|emoji| emoji.usable).collect(),
                 ..set

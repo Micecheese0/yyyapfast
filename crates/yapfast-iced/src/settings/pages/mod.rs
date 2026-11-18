@@ -22,6 +22,7 @@ pub(super) use account::BLOCKED_STEP;
 mod advanced;
 mod discord;
 mod games;
+mod message_logger;
 mod messages;
 mod notifications;
 mod sounds;
@@ -45,6 +46,22 @@ pub enum Pref {
     ShareTyping(bool),
     ReplyPing(bool),
     StripTracking(bool),
+    FreeEmoji(bool),
+    FreeStickers(bool),
+    ClipBypass(bool),
+    ForceClip(bool),
+    TenorGifs(bool),
+    KeepDeleted(bool),
+    KeepEdits(bool),
+    LogBots(bool),
+    Archive(bool),
+    /// Which servers and channels the log keeps: 0 all but those listed, 1
+    /// only those.
+    LogMode(usize),
+    /// The largest picture, GIF and video the log saves, as a choice 0 to 4.
+    LogImageSize(usize),
+    LogGifSize(usize),
+    LogVideoSize(usize),
     Notifications(bool),
     NotificationText(bool),
     FlashTaskbar(bool),
@@ -166,6 +183,78 @@ impl Settings {
                 prefs.strip_tracking = Some(on);
                 cx.keep("strip_tracking", on);
                 cx.dispatch(Action::StripTracking(on));
+            }
+            Pref::FreeEmoji(on) => {
+                prefs.free_emoji = on;
+                let value = prefs.bypass();
+                cx.keep("free_emoji", on);
+                cx.dispatch(Action::SetBypass(value));
+            }
+            Pref::FreeStickers(on) => {
+                prefs.free_stickers = on;
+                let value = prefs.bypass();
+                cx.keep("free_stickers", on);
+                cx.dispatch(Action::SetBypass(value));
+            }
+            Pref::ClipBypass(on) => {
+                prefs.clip_bypass = on;
+                let value = prefs.bypass();
+                cx.keep("clip_bypass", on);
+                cx.dispatch(Action::SetBypass(value));
+            }
+            Pref::ForceClip(on) => {
+                prefs.force_clip = on;
+                let value = prefs.bypass();
+                cx.keep("force_clip", on);
+                cx.dispatch(Action::SetBypass(value));
+            }
+            Pref::TenorGifs(on) => {
+                prefs.tenor_gifs = on;
+                cx.keep("tenor_gifs", on);
+                cx.dispatch(Action::SetTenorGifs(on));
+            }
+            Pref::KeepDeleted(on) => {
+                prefs.keep_deleted = on;
+                let value = prefs.logging();
+                cx.keep("keep_deleted", on);
+                cx.dispatch(Action::SetLogging(value));
+            }
+            Pref::KeepEdits(on) => {
+                prefs.keep_edits = on;
+                let value = prefs.logging();
+                cx.keep("keep_edits", on);
+                cx.dispatch(Action::SetLogging(value));
+            }
+            Pref::LogBots(on) => {
+                prefs.log_bots = on;
+                let value = prefs.logging();
+                cx.keep("log_bots", on);
+                cx.dispatch(Action::SetLogging(value));
+            }
+            Pref::Archive(on) => {
+                prefs.archive = on;
+                let value = prefs.logging();
+                cx.keep("archive", on);
+                cx.dispatch(Action::SetLogging(value));
+            }
+            Pref::LogMode(index) => cx.dispatch(Action::SetLogWhitelist(index == 1)),
+            Pref::LogImageSize(index) => {
+                prefs.log_image_size = Some(index as i32);
+                let value = prefs.logging();
+                cx.keep("log_image_size", index);
+                cx.dispatch(Action::SetLogging(value));
+            }
+            Pref::LogGifSize(index) => {
+                prefs.log_gif_size = Some(index as i32);
+                let value = prefs.logging();
+                cx.keep("log_gif_size", index);
+                cx.dispatch(Action::SetLogging(value));
+            }
+            Pref::LogVideoSize(index) => {
+                prefs.log_video_size = Some(index as i32);
+                let value = prefs.logging();
+                cx.keep("log_video_size", index);
+                cx.dispatch(Action::SetLogging(value));
             }
             Pref::Notifications(on) => {
                 prefs.notifications = Some(on);

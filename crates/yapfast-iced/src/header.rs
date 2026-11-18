@@ -74,6 +74,8 @@ pub struct Header {
     pub can_notify: bool,
     pub muted: bool,
     pub can_pin: bool,
+    /// The message log's clock: a Discord channel with pins, not a forum.
+    pub can_log: bool,
     /// Add people: to a DM (true) or a group.
     pub add_people: Option<bool>,
     pub members_available: bool,
@@ -139,6 +141,11 @@ pub fn header(state: &AppState, was: &Header, link: u32) -> Header {
         can_pin: state
             .conversation_that(|can| can.pins)
             .is_some_and(|room| !room.forum),
+        can_log: state
+            .conversation_that(|can| can.pins)
+            .is_some_and(|room| {
+                !room.forum && yapfast_core::discord::parse_room(&room.id).is_some()
+            }),
         add_people: (state.discord_online && state.dm_that(|can| can.group_dms).is_some())
             .then_some(room.person.is_some()),
         members_available: state.lists_members(),
@@ -443,6 +450,14 @@ fn header_buttons<'a>(ctx: crate::ctx::Ctx<'a>) -> Vec<Element<'a, Message>> {
             "Pinned messages",
             Message::Popover(crate::header_popovers::Event::Pins),
             false,
+        );
+    }
+    if header.can_log {
+        push(
+            Icon::History,
+            "Message log",
+            Message::Popover(crate::header_popovers::Event::Log),
+            crate::header_popovers::log_open(ctx.state),
         );
     }
     if let Some(one_to_one) = header.add_people {

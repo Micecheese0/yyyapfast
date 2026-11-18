@@ -1234,6 +1234,46 @@ impl Tracker {
         self.previews.insert(channel.clone(), preview.clone()) != Some(preview)
     }
 
+    /// The names of server `guild` and of its channel or thread `channel`, for
+    /// the message log's index.
+    pub(super) fn place_names(&self, guild: &str, channel: &str) -> Option<(String, String)> {
+        let server = self.servers.iter().find(|server| server.id == guild)?;
+        let found = server
+            .text_channels
+            .iter()
+            .chain(&server.voice_channels)
+            .chain(&server.threads)
+            .find(|known| known.id == channel)?;
+        Some((server.name.clone(), found.name.clone()))
+    }
+
+    /// Server `guild`'s name, and each of its channels and threads by id and
+    /// name; `channel`'s and its threads' alone when one is named.
+    pub(super) fn places_under(
+        &self,
+        guild: &str,
+        channel: Option<&str>,
+    ) -> (String, Vec<(String, String)>) {
+        let Some(server) = self.servers.iter().find(|server| server.id == guild) else {
+            return (String::new(), Vec::new());
+        };
+        // A deleted channel's threads go with it, but a category's channels
+        // only leave it.
+        let places = server
+            .text_channels
+            .iter()
+            .chain(&server.voice_channels)
+            .filter(|known| channel.is_none_or(|channel| known.id == channel))
+            .chain(server.threads.iter().filter(|thread| {
+                channel.is_none_or(|channel| {
+                    thread.id == channel || thread.parent.as_deref() == Some(channel)
+                })
+            }))
+            .map(|known| (known.id.clone(), known.name.clone()))
+            .collect();
+        (server.name.clone(), places)
+    }
+
     /// A message request's preview was deleted: it's asked for again.
     pub(super) fn unpreview(&mut self, channel: &str, id: &str) -> bool {
         if !self

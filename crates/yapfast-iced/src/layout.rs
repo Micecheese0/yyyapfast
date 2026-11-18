@@ -179,6 +179,27 @@ pub struct Prefs {
     pub strip_tracking: Option<bool>,
     pub share_typing: Option<bool>,
     pub animate: Animate,
+    /// Messages' Nitro bypasses and Tenor: emoji and stickers from any server
+    /// go as their pictures, large MP4 and MOV videos as clips (every one
+    /// with `force_clip`), and the GIF picker finds GIFs on Tenor's website;
+    /// each off unless turned on.
+    pub free_emoji: bool,
+    pub free_stickers: bool,
+    pub clip_bypass: bool,
+    pub force_clip: bool,
+    pub tenor_gifs: bool,
+    /// Message Logger: deleted messages stay in the chat, edited ones keep
+    /// what they said before, bots' messages count too, and the
+    /// `MsgLogData` folder keeps messages and media (each off unless turned
+    /// on), and how large each kind of file may be: 0 to 4 for 5 MB, 25 MB,
+    /// 100 MB, 500 MB or no limit; none while it's the default.
+    pub keep_deleted: bool,
+    pub keep_edits: bool,
+    pub log_bots: bool,
+    pub archive: bool,
+    pub log_image_size: Option<i32>,
+    pub log_gif_size: Option<i32>,
+    pub log_video_size: Option<i32>,
     /// Appearance's profile switches, and nameplates.
     pub nameplates: Option<bool>,
     pub profile_effects: Option<bool>,
@@ -223,7 +244,42 @@ pub enum Animate {
     Never,
 }
 
+/// The largest a file of the message log may be, in MB, for the size
+/// Settings chose, 0 to 4: 0 means no limit.
+pub fn log_size_mb(choice: i32) -> u64 {
+    match choice {
+        0 => 5,
+        1 => 25,
+        2 => 100,
+        3 => 500,
+        _ => 0,
+    }
+}
+
 impl Prefs {
+    /// The switches for what Discord keeps for Nitro, as the core takes them.
+    pub fn bypass(&self) -> yapfast_core::chat::Bypass {
+        yapfast_core::chat::Bypass {
+            emoji: self.free_emoji,
+            stickers: self.free_stickers,
+            clips: self.clip_bypass,
+            force_clips: self.force_clip,
+        }
+    }
+
+    /// What the message logger keeps, as the core takes it.
+    pub fn logging(&self) -> yapfast_core::chat::Logging {
+        yapfast_core::chat::Logging {
+            deleted: self.keep_deleted,
+            edits: self.keep_edits,
+            bots: self.log_bots,
+            archive: self.archive,
+            image_mb: log_size_mb(self.log_image_size.unwrap_or(1)),
+            gif_mb: log_size_mb(self.log_gif_size.unwrap_or(1)),
+            video_mb: log_size_mb(self.log_video_size.unwrap_or(2)),
+        }
+    }
+
     /// The profile switches, each on unless turned off.
     pub fn cosmetics(&self) -> yapfast_core::application::Cosmetics {
         let default = yapfast_core::application::Cosmetics::default();
@@ -375,6 +431,10 @@ impl Layout {
             Action::SetCosmetics(self.prefs.cosmetics()),
             Action::StripTracking(self.prefs.strip_tracking.unwrap_or(true)),
             Action::HideNameplates(!self.prefs.nameplates.unwrap_or(true)),
+            Action::SetBypass(self.prefs.bypass()),
+            Action::SetTenorGifs(self.prefs.tenor_gifs),
+            Action::SetLogging(self.prefs.logging()),
+            Action::LoadLogRules,
         ]
     }
 }

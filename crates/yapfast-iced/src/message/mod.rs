@@ -152,7 +152,11 @@ pub fn message_content<'a>(
             .align_y(Alignment::Center),
         );
     }
-    let ink = if message.deleted || message.delivery != chat::Delivery::default() {
+    // A deleted message the logger kept is tinted red, which says it is gone
+    // from Discord; one still sending is greyed.
+    let ink = if message.deleted {
+        crate::theme::mix(theme.danger_text, theme.text, 0.55)
+    } else if message.delivery != chat::Delivery::default() {
         theme.muted
     } else if message.notice.is_some() {
         theme.secondary

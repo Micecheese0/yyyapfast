@@ -15,7 +15,7 @@ use iced::{
 };
 use yapfast_core::{
     application::{Action, AppState},
-    chat::{ListedThread, Permission, Presence},
+    chat::{ListedThread, LogEntry, Permission, Presence},
 };
 
 use crate::{
@@ -41,6 +41,11 @@ const GAP: f32 = 6.0;
 const MARGIN: f32 = 8.0;
 const PINS_WIDTH: f32 = 420.0;
 const PINS_MOST: f32 = 560.0;
+const LOG_WIDTH: f32 = 580.0;
+const LOG_MOST: f32 = 640.0;
+/// A server's message log opens beside the rail, at this distance from the
+/// window's left edge, wherever it was opened from.
+const LOG_LEFT: f32 = 88.0;
 const PEOPLE_WIDTH: f32 = 440.0;
 const PEOPLE_MOST: f32 = 520.0;
 const TOPIC_WIDTH: f32 = 440.0;
@@ -64,6 +69,9 @@ pub struct Popovers {
     /// The right edge of the button the open one came from.
     pub right: f32,
     pins: Vec<Found>,
+    /// The message log's entries on its tab, each with the channel's name
+    /// over it and the room to jump to.
+    log: Vec<LogRow>,
     threads: Vec<ThreadRow>,
     threads_shown: Option<u64>,
     pub threads_query: String,
@@ -78,6 +86,7 @@ impl Popovers {
     /// and the topic.
     pub fn forget_laid(&mut self) {
         self.pins.clear();
+        self.log.clear();
         self.topic = None;
     }
 
@@ -105,6 +114,21 @@ impl Popovers {
                     self.right = right;
                     cx.dispatch(Action::ShowPins(true));
                 }
+            }
+            Event::Log => {
+                let open = log_open(cx.state());
+                self.close(cx);
+                if !open {
+                    self.right = right;
+                    cx.dispatch(Action::ShowMessageLog(true));
+                }
+            }
+            Event::LogTab(tab) => cx.dispatch(Action::SetLogTab(tab)),
+            Event::LogOrder => cx.dispatch(Action::ToggleLogOrder),
+            Event::LogMore => cx.dispatch(Action::ShowMoreLog),
+            Event::LogJump(room, item) => {
+                self.close(cx);
+                cx.dispatch(Action::JumpInRoom { room, item });
             }
             Event::Threads => {
                 let open = cx.state().thread_list().is_some();
@@ -207,6 +231,9 @@ impl Popovers {
         if pins_open(cx.state()) {
             cx.dispatch(Action::ShowPins(false));
         }
+        if log_open(cx.state()) {
+            cx.dispatch(Action::ShowMessageLog(false));
+        }
         if cx.state().thread_list().is_some() {
             cx.dispatch(Action::ShowThreads(false));
         }
@@ -218,6 +245,7 @@ impl Popovers {
     /// Whether a popover is open, for Escape.
     pub fn is_open(&self, state: &AppState) -> bool {
         pins_open(state)
+            || log_open(state)
             || people_open(state)
             || state.thread_list().is_some()
             || self.topic.is_some()
@@ -309,6 +337,24 @@ fn pins_open(state: &AppState) -> bool {
         .is_some_and(|pins| state.selected.as_ref() == Some(&pins.room))
 }
 
+/// Whether the message log shows: the open conversation's, or a server's or
+/// the deleted ones', which show wherever they were opened.
+pub fn log_open(state: &AppState) -> bool {
+    state
+        .message_log
+        .as_ref()
+        .is_some_and(|log| log.server || state.selected.as_ref() == Some(&log.room))
+}
+
+/// One of the message log's entries as its list shows it.
+struct LogRow {
+    found: Found,
+    /// The channel's name over it, when the list holds more than one's.
+    heading: String,
+    /// The room its Jump goes to; none for a channel that was deleted.
+    room: String,
+}
+
 /// Whether Select Friends shows for the open conversation.
 fn people_open(state: &AppState) -> bool {
     state
@@ -354,6 +400,13 @@ struct PickRow {
 #[derive(Clone, Debug)]
 pub enum Event {
     Pins,
+    /// The header's clock: the message log opens or closes.
+    Log,
+    LogTab(usize),
+    LogOrder,
+    LogMore,
+    /// A log entry's message, by its room and item.
+    LogJump(String, String),
     Threads,
     AddPeople,
     /// The header's line of a channel's topic was clicked.
@@ -434,6 +487,7 @@ pub fn popovers_sync(app: &mut App) {
             app.popovers.pins.push(found);
         }
     }
+    log_sync(app);
     app.popovers.threads_sync(&app.client.app);
     app.popovers.people_sync(app.client.state());
     // The topic goes with its room, or with the topic.
@@ -445,10 +499,78 @@ pub fn popovers_sync(app: &mut App) {
     }
 }
 
+/// Builds the message log's rows when what they show changed, and lets go
+/// of a closed one's.
+fn log_sync(app: &mut App) {
+    let state = app.client.state();
+    let shown: Vec<&LogEntry> = state
+        .message_log
+        .as_ref()
+        .filter(|_| log_open(state))
+        .map(|log| log.shown())
+        .unwrap_or_default();
+    // A channel's name goes over its messages when the list holds those of
+    // more than one, and always in the list of what was deleted.
+    let named = state.message_log.as_ref().is_some_and(|log| log.gone)
+        || shown
+            .iter()
+            .map(|entry| entry.channel.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            > 1;
+    let heading = |entry: &LogEntry| {
+        if named {
+            entry.channel.as_str()
+        } else {
+            ""
+        }
+    };
+    let kept = app
+        .popovers
+        .log
+        .iter()
+        .zip(&shown)
+        // The same message as it reads now, with what heads it: pictures
+        // that came since lay it out again.
+        .take_while(|(row, entry)| {
+            *row.found.message == entry.message
+                && row.heading == heading(entry)
+                && row.room == entry.room
+        })
+        .count();
+    if kept == app.popovers.log.len() && kept == shown.len() {
+        return;
+    }
+    let fresh: Vec<_> = shown[kept..]
+        .iter()
+        .map(|entry| {
+            (
+                std::sync::Arc::new(entry.message.clone()),
+                heading(entry).to_owned(),
+                entry.room.clone(),
+            )
+        })
+        .collect();
+    app.popovers.log.truncate(kept);
+    for (message, heading, room) in fresh {
+        let found = crate::found::found(app, message);
+        app.popovers.log.push(LogRow {
+            found,
+            heading,
+            room,
+        });
+    }
+}
+
 /// The pictures the open popover and the search's results show: found
 /// messages' authors, threads' people, friends to pick.
 pub fn popover_pictures(app: &App) -> Vec<&str> {
-    let found = app.popovers.pins.iter().map(|found| &found.message);
+    let found = app
+        .popovers
+        .pins
+        .iter()
+        .map(|found| &found.message)
+        .chain(app.popovers.log.iter().map(|row| &row.found.message));
     let results = crate::search::searching_messages(app);
     let mut urls: Vec<&str> = found
         .chain(results)
@@ -497,6 +619,8 @@ impl<'a> View<'a> {
         }
         let (panel, width, most) = if pins_open(self.cx.state) {
             (self.pins_view(), PINS_WIDTH, PINS_MOST)
+        } else if log_open(self.cx.state) {
+            (self.log_view(), LOG_WIDTH, LOG_MOST)
         } else if self.cx.state.thread_list().is_some() {
             // As Discord's: 35% of the window wide, from 480 to 600 px.
             let width = (self.cx.look.window.width * 0.35).clamp(480.0, 600.0);
@@ -508,9 +632,22 @@ impl<'a> View<'a> {
         };
         let width = width.min(self.cx.look.window.width - 2.0 * MARGIN);
         let top = crate::header::HEIGHT + GAP;
-        let x = (self.s.right - width)
-            .min(self.cx.look.window.width - width - MARGIN)
-            .max(MARGIN);
+        // A server's log, or the deleted ones', has no header button to open
+        // from: it opens beside the rail.
+        let beside_rail = log_open(self.cx.state)
+            && self
+                .cx
+                .state
+                .message_log
+                .as_ref()
+                .is_some_and(|log| log.server);
+        let x = if beside_rail {
+            LOG_LEFT
+        } else {
+            self.s.right - width
+        }
+        .min(self.cx.look.window.width - width - MARGIN)
+        .max(MARGIN);
         let height = most.min(self.cx.look.window.height - top - 2.0 * MARGIN);
         let panel = container(panel).width(width).max_height(height);
         let panel = if self.cx.state.thread_list().is_some() || people_open(self.cx.state) {
@@ -652,6 +789,113 @@ impl<'a> View<'a> {
             None,
             None,
             body,
+        )
+    }
+
+    fn log_view(self) -> Element<'a, Message> {
+        let theme = self.cx.look.theme;
+        let state = self.cx.state;
+        let Some(log) = state.message_log.as_ref() else {
+            return Space::new().into();
+        };
+        let title = if log.gone {
+            "Deleted servers and channels"
+        } else if log.server {
+            "Server message log"
+        } else {
+            "Message log"
+        };
+        let tabs = controls::choices_within(
+            theme,
+            &["Deleted", "Ghost pings", "Edited", "Mass deletions", "Media"],
+            log.tab.min(4),
+            LOG_WIDTH - 24.0,
+            |tab| Message::Popover(Event::LogTab(tab)),
+        );
+        let order = controls::action(
+            theme,
+            if log.oldest_first {
+                "Oldest first \u{21C5}"
+            } else {
+                "Newest first \u{21C5}"
+            },
+            Kind::Ghost,
+            Some(Message::Popover(Event::LogOrder)),
+        )
+        .small();
+        let place = if log.gone {
+            "any deleted server or channel"
+        } else if log.server {
+            "this server"
+        } else {
+            "this channel"
+        };
+        let note = match &log.entries {
+            None => Some("Loading the message log...".to_owned()),
+            Some(Err(error)) => Some(error.clone()),
+            Some(Ok(_)) if log.shown().is_empty() => Some(match log.tab {
+                0 => format!("No deleted messages are logged for {place}."),
+                1 => format!("No ghost pings are logged for {place}."),
+                2 => format!("No edited messages are logged for {place}."),
+                3 => format!("No mass deletions are logged for {place}."),
+                _ => format!("No saved pictures, GIFs or videos are logged for {place}."),
+            }),
+            Some(Ok(_)) => None,
+        };
+        let list = match note {
+            Some(note) => self.note(Some(Icon::History), note),
+            None => {
+                let mut items: Vec<Element<'a, Message>> = Vec::new();
+                for row in &self.s.log {
+                    let jump = (!row.room.is_empty()).then(|| {
+                        Message::Popover(Event::LogJump(
+                            row.room.clone(),
+                            row.found.message.item.clone(),
+                        ))
+                    });
+                    let card = crate::found::found_card(self.cx, &row.found, jump);
+                    items.push(if row.heading.is_empty() {
+                        card
+                    } else {
+                        column![
+                            elide(row.heading.as_str())
+                                .size(13)
+                                .font(SEMIBOLD)
+                                .color(theme.secondary),
+                            card,
+                        ]
+                        .spacing(4)
+                        .into()
+                    });
+                }
+                // At the end of the list: the next page of messages.
+                if log.more || log.loading_more {
+                    let more = controls::action(
+                        theme,
+                        if log.loading_more {
+                            "Loading more messages..."
+                        } else {
+                            "Load more messages"
+                        },
+                        Kind::Plain,
+                        (!log.loading_more).then(|| Message::Popover(Event::LogMore)),
+                    );
+                    items.push(container(more).width(Length::Fill).center_x(Length::Fill).into());
+                }
+                scroll_view(column(items).spacing(8).padding(12))
+                    .style(scrollbar(theme))
+                    .into()
+            }
+        };
+        let body = column![container(tabs).padding(Padding::ZERO.top(8).left(12).right(12)), list]
+            .spacing(4);
+        self.frame(
+            false,
+            Icon::History,
+            self.heading(title),
+            None,
+            Some(order.into()),
+            body.into(),
         )
     }
 

@@ -129,6 +129,8 @@ pub fn keep_discord_files(root: &std::path::Path) {
     }
     yapfast_discord::cookies::keep_in(root.join("discord-cookies.json"));
     yapfast_discord::cache::keep_in(root.join("discord-account.json"));
+    // Plain files, tied to no login: see `yapfast_discord::msglog`.
+    yapfast_discord::msglog::keep_in(root.join("MsgLogData"));
 }
 
 /// Check linked native services without a session, network request or audio device.

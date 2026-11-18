@@ -68,7 +68,16 @@ recording. Each change is kept at once in
   previews are off." where a card was the whole message), long messages
   folding, boost gems in the member list, sharing that this account types
   (off, the core's typing commands go nowhere), mentioning those replied
-  to and tracking taken out of links.
+  to and tracking taken out of links; in Discord builds Free emoji, Free
+  stickers, Send large videos as clips (with Send every video as a clip) and
+  Find GIFs on Tenor, each off until turned on (`Prefs::bypass`, the core's
+  `Action::SetBypass` and `SetTenorGifs`).
+- Message Logger (`pages/message_logger.rs`, in Discord builds, between
+  Advanced and About): keeping deleted messages, edit history and bots'
+  messages, saving messages and media to the `MsgLogData` folder with the
+  largest picture, GIF and video, which servers and channels are logged (a
+  list the menus add to) and the button that opens the log of deleted
+  servers and channels (`Prefs::logging`, `Action::SetLogging`).
 - Notifications, Sounds (the set, which plays a sound when chosen, the
   volume, and each sound's own with its play button) and Advanced.
   Advanced holds Start when you sign in, Open Discord

@@ -90,7 +90,11 @@ pub(super) fn found(
         .unwrap_or_else(|| message.author.clone());
     let ordinary = message.system.is_none();
     let timestamp = message.timestamp();
-    let (body, mentions) = rendered(discord, server, &message.content);
+    let (body, mentions) = rendered(
+        discord,
+        server,
+        &yapfast_discord::logger::shown_content(message),
+    );
     let body = match &message.system {
         Some(system) => system_body(&author, system),
         None => body,
@@ -115,6 +119,7 @@ pub(super) fn found(
         time: crate::clock::time(timestamp),
         timestamp,
         edited: message.edited,
+        deleted: message.deleted,
         attachments: message
             .attachments
             .iter()
@@ -315,6 +320,20 @@ pub(super) async fn with_previews(
 
 /// A picture downloaded and decoded at the timeline's preview size.
 pub(super) async fn preview(discord: &Discord, url: &str) -> Option<Arc<Picture>> {
+    // A deleted message's picture the message log saved, decoded where it is.
+    if let Some(file) = yapfast_discord::msglog::local_path(url) {
+        return tokio::task::spawn_blocking(move || {
+            crate::chat::decode_picture_at(
+                &file,
+                crate::chat::PREVIEW_WIDTH,
+                crate::chat::PREVIEW_HEIGHT,
+            )
+        })
+        .await
+        .ok()
+        .flatten()
+        .map(Arc::new);
+    }
     let data = discord
         .download(url, MAX_PREVIEW_DOWNLOAD_BYTES)
         .await

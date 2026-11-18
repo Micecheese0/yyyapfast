@@ -47,6 +47,11 @@ pub enum MenuChoice {
     /// Run an app's user command on them, from a submenu of those the open
     /// room's command index offers; see `commands.rs`.
     Apps,
+    /// Adds a Discord server or channel to the message log's list of those it
+    /// keeps, or leaves out, or takes it off; see `Action::ToggleLogged`.
+    LogPlace,
+    /// Open the message log of every channel of a Discord server.
+    OpenServerLog,
     /// Copy a link to it that its network's apps open.
     CopyLink,
     /// Copy its id as its network knows it.
@@ -324,10 +329,34 @@ impl AppState {
         {
             choices.extend(self.notification_choices());
         }
+        if room.network == Network::Discord && room.parent.is_none() && self.can_log_places() {
+            choices.push(MenuChoice::LogPlace);
+        }
         if !self.preview {
             choices.extend([MenuChoice::CopyLink, MenuChoice::CopyId]);
         }
         choices
+    }
+
+    /// Whether the message log's list can take a server or channel: a
+    /// Discord account is linked.
+    pub(super) fn can_log_places(&self) -> bool {
+        !self.preview && self.discord_user.is_some()
+    }
+
+    /// The id the message log's list keeps `id`'s server or channel by: the
+    /// server's, or the channel's, as Discord numbers them.
+    pub fn log_place_id(&self, id: &str) -> Option<String> {
+        if self.servers.iter().any(|server| server.id == id) {
+            return discord::parse_server(id).map(str::to_owned);
+        }
+        discord::parse_room(id).map(|(_, channel)| channel.to_owned())
+    }
+
+    /// Whether the server or channel `id` is on the message log's list.
+    pub fn log_place_listed(&self, id: &str) -> bool {
+        self.log_place_id(id)
+            .is_some_and(|place| self.log_listed.contains(&place))
     }
 
     /// How a DM's or a server member's menu changes how this Discord
@@ -364,6 +393,9 @@ impl AppState {
         }
         if self.unread_channels(id).next().is_some() {
             choices.push(MenuChoice::MarkRead);
+        }
+        if self.can_log_places() {
+            choices.push(MenuChoice::LogPlace);
         }
         choices.extend([MenuChoice::CopyLink, MenuChoice::CopyId]);
         choices

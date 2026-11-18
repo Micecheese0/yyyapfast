@@ -75,6 +75,17 @@ pub fn found_view<'a>(
     found: &'a Found,
     jump: Message,
 ) -> Element<'a, Message> {
+    found_card(ctx, found, Some(jump))
+}
+
+/// A found message's card, whose click and Jump button send `jump`; with
+/// none, as the message log's entries of a deleted channel, the card is
+/// only read.
+pub fn found_card<'a>(
+    ctx: crate::ctx::Ctx<'a>,
+    found: &'a Found,
+    jump: Option<Message>,
+) -> Element<'a, Message> {
     let theme = ctx.look.theme;
     let message = &found.message;
     let name_ink = message.color.map_or(theme.text, hex);
@@ -175,8 +186,11 @@ pub fn found_view<'a>(
     let card = button(content)
         .padding(0)
         .width(Length::Fill)
-        .on_press(jump.clone())
+        .on_press_maybe(jump.clone())
         .style(controls::outlined_lit_style(rest, lit, edge, edge, 8.0));
+    let Some(jump) = jump else {
+        return card.into();
+    };
     let jump_button = container(controls::action(theme, "Jump", Kind::Plain, Some(jump)).small())
         .width(Length::Fill)
         .padding(8)

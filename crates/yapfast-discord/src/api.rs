@@ -131,6 +131,236 @@ pub struct User {
 pub struct Upload {
     pub filename: String,
     pub uploaded_filename: String,
+    /// Sent as a clip, whose size limit is larger: see [`mark_clip`].
+    pub clip: Option<Clip>,
+}
+
+/// What a clip's attachment says besides its file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Clip {
+    /// When it was made, as Discord's `clip_created_at`: ISO 8601.
+    pub created_at: String,
+    /// Who is in it, as `clip_participant_ids`: this account.
+    pub participant: String,
+}
+
+/// The largest file Discord takes as a clip.
+pub const CLIP_LIMIT: u64 = 100 * 1024 * 1024;
+
+/// The application a clip says it was recorded by.
+const CLIP_APPLICATION: &str = "1301689862256066560";
+
+/// What Discord looks for at the end of a clip's file: a `uuid` box that
+/// its own game clips carry.
+const CLIP_MARK: [u8; 24] = [
+    0x00, 0x00, 0x2e, 0x2e, 0x75, 0x75, 0x69, 0x64, 0xa1, 0xc8, 0x52, 0x99, 0x33, 0x46, 0x4d, 0xb8,
+    0x88, 0xf0, 0x83, 0xf5, 0x7a, 0x75, 0xa5, 0xef,
+];
+
+/// Whether `name` is a video that can go as a clip as it is: MP4 or MOV,
+/// whose box layout lets the mark follow the video.
+pub fn can_clip(name: &str) -> bool {
+    std::path::Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["mp4", "m4v", "mov"]
+                .iter()
+                .any(|known| extension.eq_ignore_ascii_case(known))
+        })
+}
+
+/// Makes a video's bytes a clip, which Discord takes up to [`CLIP_LIMIT`]
+/// whoever sends it: the video as [`normalize_mp4`] writes it, and the clip
+/// mark at its end. A video that can't be rewritten gets the mark as it is.
+pub fn make_clip(data: Vec<u8>) -> Vec<u8> {
+    let mut data = normalize_mp4(&data).unwrap_or(data);
+    mark_clip(&mut data);
+    data
+}
+
+/// Ends `data` with the clip mark, once.
+pub fn mark_clip(data: &mut Vec<u8>) {
+    if !is_clip(data) {
+        data.extend_from_slice(&CLIP_MARK);
+    }
+}
+
+/// Whether `data` ends with the clip mark.
+fn is_clip(data: &[u8]) -> bool {
+    data.ends_with(&CLIP_MARK)
+}
+
+/// A box of an MP4 or MOV file: where it starts, where its contents start
+/// and where it ends, with its four-letter name.
+struct Mp4Box {
+    start: usize,
+    contents: usize,
+    end: usize,
+    kind: [u8; 4],
+}
+
+/// The boxes between `from` and `to`, or none if they don't fit together.
+fn mp4_boxes(data: &[u8], from: usize, to: usize) -> Option<Vec<Mp4Box>> {
+    let mut boxes = Vec::new();
+    let mut at = from;
+    while at < to {
+        if to - at < 8 {
+            return None;
+        }
+        let size = u32::from_be_bytes(data[at..at + 4].try_into().ok()?) as usize;
+        let kind: [u8; 4] = data[at + 4..at + 8].try_into().ok()?;
+        let (header, size) = match size {
+            0 => (8, to - at),
+            1 if to - at >= 16 => (
+                16,
+                usize::try_from(u64::from_be_bytes(data[at + 8..at + 16].try_into().ok()?)).ok()?,
+            ),
+            1 => return None,
+            size => (8, size),
+        };
+        if size < header || size > to - at {
+            return None;
+        }
+        boxes.push(Mp4Box {
+            start: at,
+            contents: at + header,
+            end: at + size,
+            kind,
+        });
+        at += size;
+    }
+    Some(boxes)
+}
+
+/// Where a `stco` or `co64` table's offsets are in the rewritten `moov`.
+struct ChunkOffsets {
+    at: usize,
+    entries: usize,
+    wide: bool,
+}
+
+/// Copies `found` to `out` as a clip's `moov` has it: without the `udta` and
+/// `meta` boxes that hold tags, and with its chunk tables noted in `tables`.
+/// A fragmented file, which has a `mvex`, gives none.
+fn copy_mp4_box(
+    data: &[u8],
+    found: &Mp4Box,
+    out: &mut Vec<u8>,
+    tables: &mut Vec<ChunkOffsets>,
+) -> Option<()> {
+    match &found.kind {
+        b"udta" | b"meta" => Some(()),
+        b"mvex" => None,
+        b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" => {
+            let head = out.len();
+            out.extend_from_slice(&[0; 4]);
+            out.extend_from_slice(&found.kind);
+            for child in mp4_boxes(data, found.contents, found.end)? {
+                copy_mp4_box(data, &child, out, tables)?;
+            }
+            let size = u32::try_from(out.len() - head).ok()?;
+            out[head..head + 4].copy_from_slice(&size.to_be_bytes());
+            Some(())
+        }
+        b"stco" | b"co64" => {
+            // Version and flags, the entry count, then the entries.
+            if found.end - found.contents < 8 {
+                return None;
+            }
+            let entries = u32::from_be_bytes(
+                data[found.contents + 4..found.contents + 8].try_into().ok()?,
+            ) as usize;
+            let wide = &found.kind == b"co64";
+            if (found.end - found.contents - 8) / if wide { 8 } else { 4 } < entries {
+                return None;
+            }
+            let head = out.len();
+            out.extend_from_slice(&data[found.start..found.end]);
+            tables.push(ChunkOffsets {
+                at: head + (found.contents - found.start) + 8,
+                entries,
+                wide,
+            });
+            Some(())
+        }
+        _ => {
+            out.extend_from_slice(&data[found.start..found.end]);
+            Some(())
+        }
+    }
+}
+
+/// An MP4 or MOV video as ffmpeg writes one with `-c copy -movflags
+/// +faststart -brand isom/avc1 -map_metadata -1`, which is the form the clips
+/// of Discord's own clients are in: the file type box says `isom`, the `moov`
+/// that indexes the video comes before the `mdat` that holds it, and no tags
+/// are left. The video itself isn't touched, only moved, and the offsets in
+/// the index follow it. None for a file this can't read, or a fragmented one.
+pub fn normalize_mp4(data: &[u8]) -> Option<Vec<u8>> {
+    let top = mp4_boxes(data, 0, data.len())?;
+    let moov = top.iter().find(|found| &found.kind == b"moov")?;
+    let mdats: Vec<&Mp4Box> = top.iter().filter(|found| &found.kind == b"mdat").collect();
+    if mdats.is_empty() || top.iter().any(|found| &found.kind == b"moof") {
+        return None;
+    }
+    let mut index = Vec::with_capacity(moov.end - moov.start);
+    let mut tables = Vec::new();
+    copy_mp4_box(data, moov, &mut index, &mut tables)?;
+    // Major brand `isom`, version 512, compatible with isom, iso2, avc1, mp41.
+    let mut file_type = Vec::with_capacity(32);
+    file_type.extend_from_slice(&32u32.to_be_bytes());
+    file_type.extend_from_slice(b"ftypisom");
+    file_type.extend_from_slice(&512u32.to_be_bytes());
+    file_type.extend_from_slice(b"isomiso2avc1mp41");
+    // Where each `mdat` starts once the index is in front of it.
+    let mut starts = Vec::with_capacity(mdats.len());
+    let mut at = file_type.len() + index.len();
+    for found in &mdats {
+        starts.push(at);
+        at += found.end - found.start;
+    }
+    let moved = |old: usize, whole: bool| {
+        mdats
+            .iter()
+            .zip(&starts)
+            .find(|(found, _)| {
+                old >= found.start && (old < found.end || (whole && old == found.end))
+            })
+            .map(|(found, start)| start + (old - found.start))
+    };
+    for table in &tables {
+        for entry in 0..table.entries {
+            if table.wide {
+                let place = table.at + entry * 8;
+                let old = usize::try_from(u64::from_be_bytes(
+                    index[place..place + 8].try_into().ok()?,
+                ))
+                .ok()?;
+                let new = moved(old, false).or_else(|| moved(old, true))?;
+                index[place..place + 8].copy_from_slice(&(new as u64).to_be_bytes());
+            } else {
+                let place = table.at + entry * 4;
+                let old = u32::from_be_bytes(index[place..place + 4].try_into().ok()?) as usize;
+                let new = moved(old, false).or_else(|| moved(old, true))?;
+                index[place..place + 4].copy_from_slice(&u32::try_from(new).ok()?.to_be_bytes());
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(at + CLIP_MARK.len());
+    out.extend_from_slice(&file_type);
+    out.extend_from_slice(&index);
+    for found in mdats {
+        let start = out.len();
+        out.extend_from_slice(&data[found.start..found.end]);
+        // A box that ran to the end of the file says so no longer, or the clip
+        // mark that follows would belong to it.
+        if found.contents - found.start == 8 && data[found.start..found.start + 4] == [0; 4] {
+            let size = u32::try_from(found.end - found.start).ok()?;
+            out[start..start + 4].copy_from_slice(&size.to_be_bytes());
+        }
+    }
+    Some(out)
 }
 
 /// The most files one message can carry.
@@ -792,11 +1022,12 @@ impl Api {
     /// before sending a message with it.
     pub async fn upload(&self, channel: &str, filename: &str, data: Vec<u8>) -> Result<Upload> {
         let path = format!("/channels/{channel}/attachments");
+        let clip = is_clip(&data);
         let body = json!({"files": [{
             "id": "0",
             "filename": filename,
             "file_size": data.len(),
-            "is_clip": false,
+            "is_clip": clip,
         }]});
         let answer = self
             .json(with_json(self.request(Method::POST, &path), &body))
@@ -822,6 +1053,11 @@ impl Api {
         Ok(Upload {
             filename: filename.to_owned(),
             uploaded_filename: uploaded_filename.to_owned(),
+            clip: clip.then(|| Clip {
+                created_at: chrono::Utc::now()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                participant: String::new(),
+            }),
         })
     }
 
@@ -1234,6 +1470,16 @@ impl Api {
             crate::gifs::LOCALE
         );
         self.json(self.request(Method::GET, &path)).await
+    }
+
+    /// A page of Tenor's website, `path` after its address, for the picker
+    /// when Tenor is where its GIFs come from. Tenor isn't Discord: this is a
+    /// plain request, without the account's token, which only
+    /// [`Self::request`] adds.
+    pub async fn tenor_page(&self, path: &str) -> Result<String> {
+        let url = format!("{}{path}", crate::tenor::SITE);
+        let page = self.read_file(&url, 4 * 1024 * 1024).await?;
+        Ok(String::from_utf8_lossy(&page).into_owned())
     }
 
     /// Tells the provider which GIF a search for `query` led to.
@@ -2612,11 +2858,18 @@ fn attachments(uploads: &[Upload]) -> Value {
         .iter()
         .enumerate()
         .map(|(index, upload)| {
-            json!({
+            let mut attachment = json!({
                 "id": index.to_string(),
                 "filename": upload.filename,
                 "uploaded_filename": upload.uploaded_filename,
-            })
+            });
+            if let Some(clip) = &upload.clip {
+                attachment["is_clip"] = true.into();
+                attachment["clip_created_at"] = clip.created_at.as_str().into();
+                attachment["clip_participant_ids"] = json!([clip.participant]);
+                attachment["application_id"] = CLIP_APPLICATION.into();
+            }
+            attachment
         })
         .collect()
 }
@@ -2776,10 +3029,84 @@ mod tests {
     }
 
     #[test]
+    fn a_video_is_written_as_ffmpeg_does_for_a_clip() {
+        use super::{CLIP_MARK, make_clip, normalize_mp4};
+        let boxed = |kind: &[u8; 4], contents: &[u8]| {
+            let mut out = ((contents.len() + 8) as u32).to_be_bytes().to_vec();
+            out.extend_from_slice(kind);
+            out.extend_from_slice(contents);
+            out
+        };
+        // A file as a phone writes it: its mdat first, its index after, tags in it.
+        let ftyp = boxed(b"ftyp", b"mp42\0\0\0\0mp42isom");
+        let mdat = boxed(b"mdat", b"VIDEO!!!");
+        let first_chunk = (ftyp.len() + 8) as u32;
+        let mut stco = vec![0, 0, 0, 0, 0, 0, 0, 1];
+        stco.extend_from_slice(&first_chunk.to_be_bytes());
+        let stbl = boxed(b"stbl", &boxed(b"stco", &stco));
+        let trak = boxed(
+            b"trak",
+            &[
+                boxed(b"mdia", &boxed(b"minf", &stbl)),
+                boxed(b"udta", b"a tag"),
+            ]
+            .concat(),
+        );
+        let moov = boxed(
+            b"moov",
+            &[boxed(b"mvhd", &[0; 4]), trak, boxed(b"udta", b"tags")].concat(),
+        );
+        let file = [ftyp, mdat, moov].concat();
+        let out = normalize_mp4(&file).unwrap();
+        assert_eq!(&out[4..16], b"ftypisom\0\0\x02\0");
+        let at = |needle: &[u8]| out.windows(needle.len()).position(|w| w == needle).unwrap();
+        assert!(at(b"moov") < at(b"mdat"), "the index comes first");
+        assert!(!out.windows(4).any(|w| w == b"udta"), "the tags are gone");
+        let place = at(b"stco") + 4 + 8;
+        let chunk = u32::from_be_bytes(out[place..place + 4].try_into().unwrap()) as usize;
+        assert_eq!(&out[chunk..chunk + 8], b"VIDEO!!!", "the offset follows the video");
+        assert!(make_clip(file).ends_with(&CLIP_MARK));
+        assert!(normalize_mp4(b"not a video").is_none());
+    }
+
+    #[test]
+    fn a_marked_video_goes_as_a_clip() {
+        use super::{CLIP_MARK, Clip, Upload, attachments, can_clip, is_clip, mark_clip};
+        assert!(can_clip("Game.MP4") && can_clip("a.mov") && !can_clip("a.mkv"));
+        let mut video = b"ftypisom".to_vec();
+        assert!(!is_clip(&video));
+        mark_clip(&mut video);
+        mark_clip(&mut video);
+        assert!(is_clip(&video));
+        assert_eq!(video.len(), 8 + CLIP_MARK.len(), "the mark is added once");
+        let upload = Upload {
+            filename: "a.mp4".into(),
+            uploaded_filename: "uploads/1/a.mp4".into(),
+            clip: Some(Clip {
+                created_at: "2026-01-02T03:04:05.000Z".into(),
+                participant: "42".into(),
+            }),
+        };
+        assert_eq!(
+            attachments(&[upload]),
+            serde_json::json!([{
+                "id": "0",
+                "filename": "a.mp4",
+                "uploaded_filename": "uploads/1/a.mp4",
+                "is_clip": true,
+                "clip_created_at": "2026-01-02T03:04:05.000Z",
+                "clip_participant_ids": ["42"],
+                "application_id": "1301689862256066560",
+            }])
+        );
+    }
+
+    #[test]
     fn a_forum_post_nests_its_first_message() {
         let upload = super::Upload {
             filename: "crash.png".into(),
             uploaded_filename: "uploads/1/crash.png".into(),
+            clip: None,
         };
         assert_eq!(
             super::post_body("Crash", 4320, &["7".into()], "It closes.", &[upload]),

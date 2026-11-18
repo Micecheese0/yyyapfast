@@ -31,6 +31,122 @@ impl Application {
         effects
     }
 
+    /// Opens the open channel's message log window, which asks what the log
+    /// holds of it, or closes it.
+    pub(super) fn show_message_log(&mut self, shown: bool) -> Vec<Effect> {
+        self.state.message_log = None;
+        let Some(room) = self
+            .state
+            .conversation_that(|can| can.pins)
+            .filter(|room| shown && !room.forum)
+            .map(|room| room.id.clone())
+        else {
+            return vec![];
+        };
+        self.state.pins = None;
+        self.state.add_people = None;
+        let mut effects = self.close_threads();
+        self.state.message_log = Some(MessageLog {
+            room: room.clone(),
+            most: chat::LOG_PAGE,
+            ..MessageLog::default()
+        });
+        effects.push(Effect::Backend(Command::Discord(
+            DiscordCommand::MessageLog {
+                room,
+                most: chat::LOG_PAGE,
+            },
+        )));
+        effects
+    }
+
+    /// Opens the message log of every channel of a Discord server.
+    pub(super) fn open_server_log(&mut self, server: String) -> Vec<Effect> {
+        if discord::parse_server(&server).is_none() {
+            return vec![];
+        }
+        self.state.pins = None;
+        self.state.add_people = None;
+        let mut effects = self.close_threads();
+        self.state.message_log = Some(MessageLog {
+            room: server.clone(),
+            server: true,
+            most: chat::LOG_PAGE,
+            ..MessageLog::default()
+        });
+        effects.push(Effect::Backend(Command::Discord(
+            DiscordCommand::ServerLog {
+                server,
+                most: chat::LOG_PAGE,
+            },
+        )));
+        effects
+    }
+
+    /// Opens the message log of the channels and servers that were deleted.
+    pub(super) fn open_deleted_log(&mut self) -> Vec<Effect> {
+        self.state.pins = None;
+        self.state.add_people = None;
+        let mut effects = self.close_threads();
+        self.state.message_log = Some(MessageLog {
+            room: chat::DELETED_LOG.to_owned(),
+            server: true,
+            gone: true,
+            most: chat::LOG_PAGE,
+            ..MessageLog::default()
+        });
+        effects.push(Effect::Backend(Command::Discord(
+            DiscordCommand::DeletedLog {
+                most: chat::LOG_PAGE,
+            },
+        )));
+        effects
+    }
+
+    /// Asks the open message log for a page more of each channel's messages;
+    /// the ones it has stay in the list until they come.
+    pub(super) fn show_more_log(&mut self) -> Vec<Effect> {
+        let Some(log) = self.state.message_log.as_mut().filter(|log| log.more) else {
+            return vec![];
+        };
+        log.most += chat::LOG_PAGE;
+        log.more = false;
+        log.loading_more = true;
+        let most = log.most;
+        let discord = if log.gone {
+            DiscordCommand::DeletedLog { most }
+        } else if log.server {
+            DiscordCommand::ServerLog {
+                server: log.room.clone(),
+                most,
+            }
+        } else {
+            DiscordCommand::MessageLog {
+                room: log.room.clone(),
+                most,
+            }
+        };
+        vec![Effect::Backend(Command::Discord(discord))]
+    }
+
+    pub(super) fn message_log_came(
+        &mut self,
+        room: String,
+        result: Result<Vec<chat::LogEntry>, String>,
+        more: bool,
+    ) {
+        if let Some(log) = self
+            .state
+            .message_log
+            .as_mut()
+            .filter(|log| log.room == room)
+        {
+            log.entries = Some(result);
+            log.more = more;
+            log.loading_more = false;
+        }
+    }
+
     pub(super) fn pins_came(&mut self, room: String, result: Result<Vec<ChatMessage>, String>) {
         if let Some(pins) = self.state.pins.as_mut().filter(|pins| pins.room == room) {
             pins.messages = Some(result);

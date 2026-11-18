@@ -1573,11 +1573,17 @@ impl Discord {
                 .map(|(name, data)| async move { self.api.upload(channel, &name, data).await }),
         )
         .await;
+        let me = self.snapshots.borrow().user_id.clone().unwrap_or_default();
         let mut uploads = Vec::with_capacity(results.len());
         let mut failed = None;
         for result in results {
             match result {
-                Ok(upload) => uploads.push(upload),
+                Ok(mut upload) => {
+                    if let Some(clip) = &mut upload.clip {
+                        clip.participant.clone_from(&me);
+                    }
+                    uploads.push(upload);
+                }
                 Err(error) => failed = failed.or(Some(error)),
             }
         }
@@ -2599,6 +2605,17 @@ impl Discord {
 
     /// The GIF picker's home: trending terms with a GIF each.
     pub async fn gifs_trending(&self) -> Result<crate::gifs::Trending> {
+        if crate::gifs::tenor() {
+            let (explore, home) = futures_util::future::join(
+                self.api.tenor_page("/explore"),
+                self.api.tenor_page("/"),
+            )
+            .await;
+            return Ok(crate::gifs::Trending {
+                categories: crate::tenor::parse_categories(&explore?),
+                preview: crate::tenor::parse_gifs(&home?).into_iter().next(),
+            });
+        }
         Ok(crate::gifs::Trending::parse(
             &self.api.gifs_trending().await?,
         ))
@@ -2606,6 +2623,9 @@ impl Discord {
 
     /// The GIFs trending now.
     pub async fn gifs_trending_gifs(&self) -> Result<Vec<crate::gifs::Gif>> {
+        if crate::gifs::tenor() {
+            return Ok(crate::tenor::parse_gifs(&self.api.tenor_page("/").await?));
+        }
         Ok(crate::gifs::parse_list(
             &self.api.gifs_trending_gifs().await?,
         ))
@@ -2613,11 +2633,19 @@ impl Discord {
 
     /// GIFs for `query`.
     pub async fn gifs_search(&self, query: &str) -> Result<Vec<crate::gifs::Gif>> {
+        if crate::gifs::tenor() {
+            let page = self.api.tenor_page(&crate::tenor::search_path(query)).await?;
+            return Ok(crate::tenor::parse_gifs(&page));
+        }
         Ok(crate::gifs::parse_list(&self.api.gifs_search(query).await?))
     }
 
     /// Up to `limit` terms to try instead of `query`.
     pub async fn gifs_suggest(&self, query: &str, limit: u32) -> Result<Vec<String>> {
+        // Tenor's pages suggest nothing to search for instead.
+        if crate::gifs::tenor() {
+            return Ok(Vec::new());
+        }
         let terms = self.api.gifs_suggest(query, limit).await?;
         Ok(terms
             .as_array()
@@ -2629,6 +2657,10 @@ impl Discord {
 
     /// Tells the provider a search for `query` led to the GIF `id`.
     pub async fn gif_select(&self, id: &str, query: &str) -> Result<()> {
+        // Tenor's GIFs have no id of Discord's provider's to report.
+        if crate::gifs::tenor() {
+            return Ok(());
+        }
         self.api.gif_select(id, query).await
     }
 
@@ -2658,6 +2690,30 @@ impl Discord {
         let sent = self.api.send_sticker(channel, id, &nonce).await?;
         self.write_names().learn_message(server(guild), &sent);
         Ok(())
+    }
+
+    /// Posts a sticker this account can't send as a sticker as its picture,
+    /// downloaded from `url` and uploaded as `filename`, in a message of its
+    /// own. The gateway shows the message.
+    pub async fn send_sticker_picture(
+        &self,
+        guild: &str,
+        channel: &str,
+        url: &str,
+        filename: &str,
+        limit: usize,
+    ) -> Result<()> {
+        let data = self.download(url, limit).await?;
+        let nonce = crate::message::nonce();
+        let sending = crate::api::Sending {
+            nonce: &nonce,
+            reply: None,
+            ping_reply: true,
+            silent: false,
+        };
+        self.send(guild, channel, "", sending, vec![(filename.to_owned(), data)])
+            .await
+            .map(drop)
     }
 
     /// The account's favourite GIFs as Yapfast last saw them, to show until
@@ -3686,6 +3742,12 @@ impl Discord {
     }
 
     async fn fetch(&self, url: &str, limit: usize, queued: bool) -> Result<Vec<u8>> {
+        // A deleted message's file, which the message log saved.
+        if let Some(file) = crate::msglog::local_path(url) {
+            let data = tokio::task::spawn_blocking(move || std::fs::read(file)).await??;
+            anyhow::ensure!(data.len() <= limit, "the file is too large");
+            return Ok(data);
+        }
         // An activity names a game's icon by the game until Discord says
         // which picture it is.
         let icon;

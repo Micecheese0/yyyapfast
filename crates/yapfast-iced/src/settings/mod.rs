@@ -75,6 +75,7 @@ pub enum Section {
     Discord,
     Sounds,
     Advanced,
+    MessageLogger,
     Appearance,
     Games,
     Keybinds,
@@ -100,6 +101,7 @@ impl Section {
             Section::Discord => "Discord",
             Section::Sounds => "Sounds",
             Section::Advanced => "Advanced",
+            Section::MessageLogger => "Message Logger",
             Section::Appearance => "Appearance",
             Section::Games => "Game Activity",
             Section::Keybinds => "Keybinds",
@@ -116,6 +118,7 @@ impl Section {
             Section::Discord => Icon::Discord,
             Section::Sounds => Icon::Volume,
             Section::Advanced => Icon::Settings,
+            Section::MessageLogger => Icon::History,
             Section::Appearance => Icon::Palette,
             Section::Games => Icon::Play,
             Section::Keybinds => Icon::Keyboard,
@@ -145,6 +148,7 @@ const GROUPS: [(&str, &[Section]); 3] = [
             Section::Games,
             Section::Keybinds,
             Section::Advanced,
+            Section::MessageLogger,
             Section::About,
         ],
     ),
@@ -230,6 +234,9 @@ pub enum Event {
     Keybind(keybinds::Event),
     /// Advanced's Restart Yapfast, after the GPU setting changed.
     Restart,
+    /// Message Logger's button: the log of every deleted server and channel
+    /// opens, over the chat Settings close on.
+    OpenDeletedLog,
 }
 
 impl Settings {
@@ -303,6 +310,10 @@ impl Settings {
             // Settings close as the editor opens (`profile::editor::follow`).
             Event::EditProfile => cx.dispatch(Action::EditProfile),
             Event::Restart => cx.request(Request::Restart),
+            Event::OpenDeletedLog => {
+                cx.request(Request::Close(Screen::Settings));
+                cx.dispatch(Action::OpenDeletedLog);
+            }
             Event::Pref(pref) => self.pref(pref, cx),
             Event::Account(event) => self.account_event(event, cx),
             Event::Game(event) => self.game_event(event, cx),
@@ -431,6 +442,7 @@ impl<'a> Page<'a> {
             Section::Discord => self.discord_page(),
             Section::Sounds => self.sounds_page(),
             Section::Advanced => self.advanced_page(),
+            Section::MessageLogger => self.message_logger_page(),
             Section::Appearance => self.appearance_page(),
             Section::Games => self.games_page(),
             Section::Keybinds => self.keybinds_page(),
@@ -570,7 +582,10 @@ impl<'a> Page<'a> {
             }
             for &section in *sections {
                 // Discord's own sections, outside the preview.
-                let discord_only = matches!(section, Section::Discord | Section::Games);
+                let discord_only = matches!(
+                    section,
+                    Section::Discord | Section::Games | Section::MessageLogger
+                );
                 if discord_only && self.cx.state.preview {
                     continue;
                 }

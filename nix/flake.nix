@@ -15,6 +15,10 @@
       # takes both. A machine that downloaded the SDK before keeps its copy.
       cargoXwin = pkgs.cargo-xwin.overrideAttrs (old: rec {
         version = "0.23.1";
+        # Its test_is_static_crt_enabled_no_flags reads the build's environment
+        # for RUSTFLAGS and fails in some, such as GitHub's runners; the tool
+        # isn't Yapfast's, and what it builds is tested by building Yapfast.
+        doCheck = false;
         src = pkgs.fetchFromGitHub {
           owner = "rust-cross";
           repo = "cargo-xwin";

@@ -5,7 +5,7 @@ presence or a channel's icon, a thread's channel (which leads back to it),
 the name, a channel's topic on one line after a dot, what a DM's person is
 up to; then the room's buttons in this order (in a Discord DM with
 someone who isn't a friend, Add Friend, or Accept Friend Request in the
-accent when they asked; calls, threads, notifications, pins, add people,
+accent when they asked; calls, threads, notifications, pins, the message log's clock, add people,
 the member list, the profile) and the search box.
 
 The header's popovers (`header_popovers.rs`) open under
@@ -21,7 +21,15 @@ showing one, or says why it can't. Threads lists a channel's threads as
 Discord's list does: the joined, other active and older ones under their
 headings, older ones loading as a scroll nears the end, Enter in its
 search finding threads by name, Create starting one, and a thread clicked
-opening in its place (with Shift beside the channel). Select Friends
+opening in its place (with Shift beside the channel). The message log's
+popover (a Discord channel's clock, or a server's menu's Open logs for
+server, which opens it beside the rail, or Settings' button for the deleted
+ones) has a tab for each of Deleted, Ghost pings, Edited, Mass deletions and
+Media, the order's button and Load more messages at the end of the list; its
+entries are found cards headed with their channel's name when the list holds
+more than one's, a click or Jump showing the message in its channel (none
+for a deleted channel's), and they're built again as their pictures come.
+Select Friends
 picks friends to add to a DM, saying how many more the group can take,
 Create Group DM or Add to Group adding them. A thread open in its place
 has the header's More, its menu as the sidebar's.

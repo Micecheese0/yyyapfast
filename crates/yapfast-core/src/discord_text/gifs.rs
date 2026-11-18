@@ -63,10 +63,17 @@ pub(super) fn command(
                 // The home Discord last answered shows at once, and one answered
                 // within a day is shown without asking again: its terms are
                 // trending ones, which move daily.
-                let kept = tokio::task::spawn_blocking(yapfast_discord::cache::gif_home_answer)
-                    .await
-                    .ok()
-                    .flatten();
+                // Tenor's home is asked for every time: what Yapfast kept is
+                // Discord's provider's, and the two don't mix.
+                let tenor = yapfast_discord::gifs::tenor();
+                let kept = if tenor {
+                    None
+                } else {
+                    tokio::task::spawn_blocking(yapfast_discord::cache::gif_home_answer)
+                        .await
+                        .ok()
+                        .flatten()
+                };
                 if let Some(home) = &kept {
                     let (categories, preview) = kept_home(home);
                     let _ = events.send(Event::GifCategories(Ok((categories, preview))));
@@ -98,10 +105,12 @@ pub(super) fn command(
                                 .collect(),
                             preview: trending.preview.as_ref().map(kept_gif),
                         };
-                        let _ = tokio::task::spawn_blocking(move || {
-                            yapfast_discord::cache::keep_gif_home_answer(&home)
-                        })
-                        .await;
+                        if !tenor {
+                            let _ = tokio::task::spawn_blocking(move || {
+                                yapfast_discord::cache::keep_gif_home_answer(&home)
+                            })
+                            .await;
+                        }
                         let preview = trending.preview.map(gif);
                         let _ = events.send(Event::GifCategories(Ok((categories, preview))));
                         let urls = trending

@@ -89,6 +89,21 @@ pub struct GifPicker {
 }
 
 impl GifPicker {
+    /// Lets go of the home and the results, which the picker asks for again:
+    /// they came from a provider that isn't the one in use now.
+    pub(super) fn forget_found(&mut self) {
+        self.categories.clear();
+        self.trending_preview = None;
+        self.home_loading = false;
+        self.home_error = None;
+        self.results.clear();
+        self.results_for = None;
+        self.loading = false;
+        self.error = None;
+        self.suggestions.clear();
+        self.suggested = None;
+    }
+
     /// The search the results are for, once they're a search's.
     fn searched(&self) -> Option<&str> {
         self.results_for.as_ref()?.as_deref()

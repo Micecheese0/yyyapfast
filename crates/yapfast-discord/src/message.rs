@@ -134,6 +134,12 @@ pub struct Message {
     #[serde(default)]
     pub notice: Option<Notice>,
     pub edited: bool,
+    /// Discord deleted it, and Yapfast kept it, see [`crate::logger`].
+    #[serde(default)]
+    pub deleted: bool,
+    /// What it said before each edit, oldest first, which Yapfast kept.
+    #[serde(default)]
+    pub history: Vec<String>,
     pub reply: Option<Reply>,
     /// Its files, then its embeds' pictures.
     pub attachments: Vec<Attachment>,
@@ -914,6 +920,8 @@ pub fn parse(value: &Value) -> Option<Message> {
         }),
         system,
         edited: value["edited_timestamp"].is_string(),
+        deleted: false,
+        history: Vec::new(),
         reply,
         attachments,
         embeds: embeds.embeds,
