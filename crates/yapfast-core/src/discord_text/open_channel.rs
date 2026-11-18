@@ -83,8 +83,19 @@ impl Run {
     /// Fits the latest page to what's kept: messages kept within its span
     /// that it lacks were deleted while the channel wasn't followed, and
     /// kept ones older than a full page that starts after them leave a gap,
-    /// so they go.
-    fn fit(&mut self, page: &Page) {
+    /// so they go. A deleted one the logger keeps stays instead, marked
+    /// deleted, and is given back for the message log to write down.
+    fn fit(&mut self, page: &Page) -> Vec<Message> {
+        let mut lost = Vec::new();
+        // A message the page lacks: kept, marked, if the logger keeps it.
+        let mut missing = |message: &mut Message| {
+            if !yapfast_discord::logger::keeps_deleted(message) {
+                return false;
+            }
+            message.deleted = true;
+            lost.push(message.clone());
+            true
+        };
         let since = page.oldest.filter(|_| page.full).unwrap_or(0);
         if page.full
             && self
@@ -94,16 +105,17 @@ impl Run {
                 .is_some_and(|&newest| newest < since)
         {
             *self = Self::default();
-            return;
+            return lost;
         }
         let Some(last) = page.messages.last() else {
             // A full page of messages Yapfast doesn't show says nothing of
             // what's kept; a short one is the whole channel.
             if !page.full {
-                self.messages.clear();
+                self.messages
+                    .retain(|_, message| message.deleted || missing(message));
                 self.hidden = None;
             }
-            return;
+            return lost;
         };
         let until = last.order();
         let listed: HashSet<u64> = page.messages.iter().map(Message::order).collect();
@@ -115,7 +127,9 @@ impl Run {
                 || listed.contains(order)
                 || message.ephemeral
                 || message.deleted
+                || missing(message)
         });
+        lost
     }
 
     /// Keeps only the newest `count`; the older ones load again.
@@ -435,11 +449,21 @@ impl OpenChannel {
     pub fn loaded(&mut self, load: Load, page: Page) {
         self.loaded = true;
         self.dirty = true;
+        // The log writes down what it hasn't of the page: messages that came
+        // while Yapfast wasn't running. Only when it's on, or the page would
+        // be copied for nothing.
+        let guild = Some(self.guild.as_str()).filter(|guild| !guild.is_empty());
+        if yapfast_discord::msglog::logging() {
+            yapfast_discord::msglog::backfill(guild, &self.channel, page.messages.clone());
+        }
         match load {
             Load::Latest => {
                 self.synced = true;
                 let run = self.latest.as_mut().unwrap_or(&mut self.shown);
-                run.fit(&page);
+                let lost = run.fit(&page);
+                // Kept messages the page lacks, deleted while Yapfast wasn't
+                // following: the log writes them down deleted.
+                yapfast_discord::msglog::lost(guild, &self.channel, lost);
                 // Only a page that's the whole channel says where it starts:
                 // older messages kept stay before a full one.
                 if !page.full {

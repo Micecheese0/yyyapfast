@@ -546,6 +546,79 @@ pub fn deleted(guild: Option<&str>, channel: &str, ids: Vec<String>, bulk: bool)
     });
 }
 
+/// Logs messages that came in a page of history, which the log has no line
+/// for when they were posted while Yapfast was closed or before it logged, so
+/// a deletion that comes later finds what they said. Those it has a line for
+/// are left. No files are saved for them: the log's pictures are those it
+/// downloaded as the messages arrived. It reads the channel's file and runs
+/// on a thread of its own.
+pub fn backfill(guild: Option<&str>, channel: &str, messages: Vec<Message>) {
+    log_history(guild, channel, messages, false);
+}
+
+/// Logs messages Discord's latest page lacks, which were deleted while
+/// Yapfast wasn't following the channel: what they said, if the log hasn't
+/// it, and their deletion. Otherwise as [`backfill`].
+pub fn lost(guild: Option<&str>, channel: &str, messages: Vec<Message>) {
+    log_history(guild, channel, messages, true);
+}
+
+fn log_history(guild: Option<&str>, channel: &str, messages: Vec<Message>, deleted: bool) {
+    if !logging() || messages.is_empty() || !wants(guild, channel) {
+        return;
+    }
+    let channel = channel.to_owned();
+    let started = std::thread::Builder::new()
+        .name("msglog-history".into())
+        .spawn(move || log_history_now(&channel, messages, deleted));
+    if let Err(error) = started {
+        tracing::warn!(%error, "could not start the message log's thread");
+    }
+}
+
+fn log_history_now(channel: &str, messages: Vec<Message>, deleted: bool) {
+    let bots = BOTS.load(Ordering::Relaxed);
+    let known = logged_ids(channel);
+    let mut lines = Vec::new();
+    for message in messages {
+        if message.bot && !bots {
+            continue;
+        }
+        if !message
+            .id
+            .parse::<u64>()
+            .is_ok_and(|order| known.contains(&order))
+        {
+            lines.push(serde_json::json!({"t": "c", "m": &message}).to_string());
+        }
+        if deleted {
+            lines.push(serde_json::json!({"t": "d", "id": message.id, "b": false}).to_string());
+        }
+    }
+    if !lines.is_empty() {
+        append(channel, &lines);
+    }
+}
+
+/// The messages of `channel` the log has a line of what they said for, a
+/// message that came or was edited: read as the file goes, only their ids
+/// held.
+fn logged_ids(channel: &str) -> HashSet<u64> {
+    let Some(file) = lines_file(channel) else {
+        return HashSet::new();
+    };
+    let Ok(file) = std::fs::File::open(file) else {
+        return HashSet::new();
+    };
+    BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .filter_map(|line| serde_json::from_str::<Light>(&line).ok())
+        .filter(|light| light.t == "c" || light.t == "e")
+        .filter_map(|light| light.message()?.parse::<u64>().ok())
+        .collect()
+}
+
 /// The kind of file an attachment is, when the log keeps it.
 fn kind(attachment: &Attachment) -> Option<Kind> {
     if attachment.shown != Shown::Message {
@@ -850,6 +923,16 @@ mod tests {
         }
     }
 
+    /// A channel's lines, each as its kind and its message's id.
+    fn lines_of(channel: &str) -> Vec<String> {
+        std::fs::read_to_string(lines_file(channel).unwrap())
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Light>(line).ok())
+            .map(|light| format!("{}{}", light.t, light.message().unwrap_or_default()))
+            .collect()
+    }
+
     #[test]
     fn folds_a_channels_lines_into_what_was_deleted_or_edited() {
         let root = std::env::temp_dir().join(format!("msglog-test-{}", std::process::id()));
@@ -924,6 +1007,14 @@ mod tests {
         append("9", &[line("c", &said("3", "three", false))]);
         let after: Vec<_> = super::logged("9").iter().map(|m| m.id.clone()).collect();
         assert_eq!(after, ["1", "2"]);
+        // A page of history logs what the log lacks, once; one the log has
+        // is left, and a message the page lacked is logged deleted.
+        let history = |id: &str| said(id, &format!("history {id}"), false);
+        log_history_now("12", vec![history("1"), history("2")], false);
+        log_history_now("12", vec![history("2"), history("3")], false);
+        assert_eq!(lines_of("12"), ["c1", "c2", "c3"]);
+        log_history_now("12", vec![history("2"), history("4")], true);
+        assert_eq!(lines_of("12")[3..], ["d2", "c4", "d4"]);
         // A message with a file saved is listed with the media, deleted or not.
         std::fs::create_dir_all(root.join("media").join("images").join("9")).unwrap();
         std::fs::write(root.join("media").join("images").join("9").join("3-0-x.png"), b"x")

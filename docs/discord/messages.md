@@ -1018,7 +1018,16 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   404 or 410 for, as an old link or one whose signature ran out, is asked for
   again from `media.discordapp.net` at the same path, with the signature and
   then without (`Api::fetch_file`, for every attachment download, a video's
-  parts included); the proxy may not have it either. A file larger than the
+  parts included); the proxy may not have it either. Every page of a
+  channel's history that loads is also written down for what the log has no
+  line of (`msglog::backfill`, on a thread of its own, reading the channel's
+  file for the ids it holds; no files are saved for these, which only
+  arriving messages get), so a message posted while Yapfast was closed can be
+  found when it is deleted later. A kept message that a reopened channel's
+  latest page lacks was deleted while Yapfast wasn't following the channel:
+  with *Keep deleted messages* on it stays, marked deleted, and the log gets
+  its line and a deletion (`msglog::lost`), where it was dropped before; the
+  time it went isn't known. A file larger than the
   largest the settings allow for its kind, or when the folder switch is off,
   isn't downloaded. It has no limit on the whole and nothing prunes it,
   unlike `MsgLogDataCache/`, which keeps each channel's newest 100 messages
