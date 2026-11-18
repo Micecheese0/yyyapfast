@@ -499,6 +499,11 @@ pub fn popovers_sync(app: &mut App) {
     }
 }
 
+/// The channel's name that heads an entry, when the list names its channels.
+fn heading_of(named: bool, entry: &LogEntry) -> &str {
+    if named { entry.channel.as_str() } else { "" }
+}
+
 /// Builds the message log's rows when what they show changed, and lets go
 /// of a closed one's.
 fn log_sync(app: &mut App) {
@@ -518,13 +523,6 @@ fn log_sync(app: &mut App) {
             .collect::<std::collections::BTreeSet<_>>()
             .len()
             > 1;
-    let heading = |entry: &LogEntry| {
-        if named {
-            entry.channel.as_str()
-        } else {
-            ""
-        }
-    };
     let kept = app
         .popovers
         .log
@@ -534,7 +532,7 @@ fn log_sync(app: &mut App) {
         // that came since lay it out again.
         .take_while(|(row, entry)| {
             *row.found.message == entry.message
-                && row.heading == heading(entry)
+                && row.heading == heading_of(named, entry)
                 && row.room == entry.room
         })
         .count();
@@ -546,7 +544,7 @@ fn log_sync(app: &mut App) {
         .map(|entry| {
             (
                 std::sync::Arc::new(entry.message.clone()),
-                heading(entry).to_owned(),
+                heading_of(named, entry).to_owned(),
                 entry.room.clone(),
             )
         })
