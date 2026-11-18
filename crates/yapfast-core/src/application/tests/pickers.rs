@@ -1070,10 +1070,24 @@ fn another_servers_emoji_and_stickers_need_the_channels_leave() {
         (Some(true), Some(true)),
         "with Nitro, where the channel leaves it"
     );
+    let allowed = app.emoji_sets_signature();
+    assert_eq!(
+        allowed,
+        {
+            other_usable(&mut app, "discord:10:21");
+            app.emoji_sets_signature()
+        },
+        "the same sets, the same signature"
+    );
     assert_eq!(
         other_usable(&mut app, "discord:10:22"),
         (Some(false), Some(false)),
         "not where it denies Use External Emojis and Stickers, Nitro or not"
+    );
+    assert_ne!(
+        allowed,
+        app.emoji_sets_signature(),
+        "the emoji a room may not use change the signature"
     );
 }
 

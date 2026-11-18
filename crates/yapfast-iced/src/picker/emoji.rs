@@ -233,28 +233,35 @@ struct Lists {
     sets: Vec<EmojiSet>,
 }
 
-impl Lists {
-    fn signature(&self) -> u64 {
-        let mut hasher = std::hash::DefaultHasher::new();
-        self.query.hash(&mut hasher);
-        self.favorites.hash(&mut hasher);
-        self.frequent.hash(&mut hasher);
-        for set in &self.sets {
-            set.id.hash(&mut hasher);
-            set.icon.hash(&mut hasher);
-            for emoji in &set.emoji {
-                (&emoji.id, emoji.usable).hash(&mut hasher);
-            }
-        }
-        hasher.finish()
-    }
-}
-
 impl Picker {
+    /// The search, and a number that changes when what the grid is built
+    /// from does, worked out from what the lists are made of and without
+    /// making them: this runs on every sync of the window while the picker
+    /// is open, and the servers' emoji, a copy of each of thousands, were
+    /// made each time to find that nothing had changed.
+    fn emoji_signature(&self, app: &Application) -> (String, u64) {
+        let query = self.field.text().trim().trim_matches(':').to_lowercase();
+        let mut hasher = std::hash::DefaultHasher::new();
+        query.hash(&mut hasher);
+        if query.is_empty() {
+            let lists = &app.state.discord_emojis;
+            let used = match self.target {
+                Target::React(..) => &lists.reactions,
+                Target::Composer | Target::Edit | Target::Status(_) | Target::Poll(..) => {
+                    &lists.frequent
+                }
+            };
+            lists.favorites.hash(&mut hasher);
+            used.hash(&mut hasher);
+            app.frequent_reactions(16).hash(&mut hasher);
+        }
+        app.emoji_sets_signature().hash(&mut hasher);
+        (query, hasher.finish())
+    }
+
     /// The account's favourites and most used, and the servers' emoji, for
     /// the picker's target.
-    fn emoji_lists(&self, app: &Application) -> Lists {
-        let query = self.field.text().trim().trim_matches(':').to_lowercase();
+    fn emoji_lists(&self, app: &Application, query: String) -> Lists {
         let sets = app.emoji_sets();
         let (favorites, frequent) = if query.is_empty() {
             let by_id: HashMap<&str, &CustomEmoji> = sets
@@ -289,13 +296,14 @@ impl Picker {
 
     /// Lays the grid out again when what it shows changed.
     pub(super) fn build_emoji(&mut self, cx: &mut Cx<'_>) {
-        let lists = self.emoji_lists(&cx.client.app);
-        let signature = lists.signature();
+        let (query, signature) = self.emoji_signature(&cx.client.app);
         let picker = &mut *self;
         if picker.built == signature {
             return;
         }
         picker.built = signature;
+        let started = std::time::Instant::now();
+        let lists = picker.emoji_lists(&cx.client.app, query);
         let width = picker.grid_width();
         let Some(tab) = &mut picker.emoji else {
             return;
@@ -404,7 +412,9 @@ impl Picker {
                 Some(("Frequently Used".into(), Mark::Clock)),
                 listed(&frequent),
             );
-            for set in &sets {
+            // Each server's emoji go into the grid as they are, with no
+            // second copy made.
+            for set in sets {
                 let Some(first) = set.emoji.first() else {
                     continue;
                 };
@@ -414,10 +424,13 @@ impl Picker {
                 };
                 section(
                     &mut grid,
-                    Some((set.server.clone(), mark)),
+                    Some((set.server, mark)),
                     set.emoji
-                        .iter()
-                        .map(|emoji| (Face::Custom(emoji.clone()), emoji.usable))
+                        .into_iter()
+                        .map(|emoji| {
+                            let usable = emoji.usable;
+                            (Face::Custom(emoji), usable)
+                        })
                         .collect(),
                 );
             }
@@ -436,6 +449,11 @@ impl Picker {
                 );
             }
         }
+        tracing::debug!(
+            tiles = grid.tiles.len(),
+            elapsed = ?started.elapsed(),
+            "laid out the emoji grid"
+        );
         tab.grid = grid;
         tab.headings = headings;
         picker.hover = None;
@@ -604,6 +622,7 @@ impl<'a> View<'a> {
         let Some(tab) = &picker.emoji else {
             return Space::new().into();
         };
+        let started = std::time::Instant::now();
         tab.used.borrow_mut().clear();
         tab.players.begin();
         let field = kit::search(&picker.field, "Find an emoji", theme);
@@ -742,6 +761,12 @@ impl<'a> View<'a> {
         tab.pictures
             .borrow_mut()
             .retain(|key, _| used.contains(key));
+        // A tab's view that is slow to make, with how many pictures it
+        // holds: the first one after it opens makes them all.
+        let elapsed = started.elapsed();
+        if elapsed > std::time::Duration::from_millis(8) {
+            tracing::debug!(?elapsed, pictures = used.len(), "the emoji view was slow");
+        }
         view.into()
     }
 }

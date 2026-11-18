@@ -5000,6 +5000,52 @@ impl Application {
         None
     }
 
+    /// The server the selected room belongs to, whether the account has
+    /// Nitro, and whether it may use another server's emoji in the room:
+    /// what [`Application::emoji_sets`] says each emoji's `usable` by.
+    #[cfg(feature = "discord")]
+    fn emoji_rules(
+        &self,
+        snapshot: &yapfast_discord::service::Snapshot,
+    ) -> (Option<&str>, bool, bool) {
+        let here = self
+            .state
+            .selected
+            .as_deref()
+            .and_then(discord::parse_room)
+            .map(|(guild, _)| guild);
+        let nitro = snapshot
+            .account
+            .as_ref()
+            .is_some_and(|account| account.premium_type > 0);
+        // Another server's emoji need Nitro, and in a server's channel
+        // Use External Emojis too, as Discord's client has them.
+        let external = nitro && self.may_use_external(chat::Permission::UseExternalEmojis);
+        (here, nitro, external)
+    }
+
+    /// A number that changes when [`Application::emoji_sets`] would: made
+    /// from the same servers' emoji without making any of them. The picker
+    /// asks it on every sync of the window, where making the sets each
+    /// time was thousands of strings made to be thrown away.
+    pub fn emoji_sets_signature(&self) -> u64 {
+        use std::hash::Hasher;
+        let mut hasher = std::hash::DefaultHasher::new();
+        #[cfg(feature = "discord")]
+        if let Some(snapshot) = &self.discord {
+            use std::hash::Hash;
+            let (here, nitro, external) = self.emoji_rules(snapshot);
+            (here, nitro, external).hash(&mut hasher);
+            for server in &snapshot.servers {
+                (&server.id, &server.name, &server.icon).hash(&mut hasher);
+                for emoji in server.emojis.iter().filter(|emoji| emoji.available) {
+                    (&emoji.id, &emoji.name, emoji.animated).hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    }
+
     /// Every custom emoji of every server the account is in, by server, the
     /// room's own server first, each saying whether this account may use it in
     /// the room it is looking at. The picker shows all of them, the ones it may
@@ -5015,19 +5061,7 @@ impl Application {
     fn emoji_sets_with(&self, bypass: bool) -> Vec<chat::EmojiSet> {
         #[cfg(feature = "discord")]
         if let Some(snapshot) = &self.discord {
-            let here = self
-                .state
-                .selected
-                .as_deref()
-                .and_then(discord::parse_room)
-                .map(|(guild, _)| guild);
-            let nitro = snapshot
-                .account
-                .as_ref()
-                .is_some_and(|account| account.premium_type > 0);
-            // Another server's emoji need Nitro, and in a server's channel
-            // Use External Emojis too, as Discord's client has them.
-            let external = nitro && self.may_use_external(chat::Permission::UseExternalEmojis);
+            let (here, nitro, external) = self.emoji_rules(snapshot);
             let mut servers: Vec<_> = snapshot.servers.iter().collect();
             servers.sort_by_key(|server| Some(server.id.as_str()) != here);
             return servers
