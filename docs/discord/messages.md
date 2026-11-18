@@ -154,11 +154,19 @@ Yapfast starts from Discord as it last saw it, kept in the data directory by
   connects, and Discord's sync replaces it. The list on screen is kept with
   them when the connection drops, so it shows again at once after
   reconnecting.
-- `discord-messages/` holds, for each channel shown lately, its newest 100
-  messages, written within 20 seconds of a change, when the channel leaves
-  the 40 kept in memory, and when Yapfast closes. The 300 channels used last are
-  kept. Opening a channel shows its saved messages, and the latest page fits
-  in as it does for a channel kept in memory.
+- `MsgLogDataCache/`, beside `MsgLogData`, holds, for each channel shown
+  lately, its newest 100 messages, written within 20 seconds of a change, when
+  the channel leaves the 40 kept in memory, and when Yapfast closes. The 300
+  channels used last are kept. Opening a channel shows its saved messages, and
+  the latest page fits in as it does for a channel kept in memory. Unlike the
+  rest of this list they are plain files, tied to no login and no key in the
+  credential store, so unlinking the account, signing in as another, or losing
+  the token leaves them (anyone who can read the data folder can read them, as
+  with `MsgLogData`). Each is written whole beside its place and renamed to
+  it, so a crash never leaves half a channel. Messages an earlier Yapfast kept
+  sealed in `discord-messages/` move there when their login opens them, and
+  the old folder goes once it is empty; a channel with a newer file keeps it.
+  Delete the folder to clear it.
 - `discord-pictures/` holds avatars, server icons, emoji and stickers, and the
   media proxy's previews of attachments and links, up to 8 MiB each. Discord
   gives each version of a picture its own address, so a kept one is never
@@ -171,9 +179,9 @@ Yapfast starts from Discord as it last saw it, kept in the data directory by
   and reads the page meanwhile, keeping what it finds for the next start;
   without it, the page is read before connecting.
 
-The files are readable only by the user and aren't encrypted. Each names its
-login by a SHA-256 hash of the token, so another linked account starts empty,
-and unlinking deletes them all. A file is written beside its own and then
+The files are readable only by the user and aren't encrypted. Each but the
+messages names its login by a SHA-256 hash of the token, so another linked
+account starts empty, and unlinking deletes them all. A file is written beside its own and then
 swapped in; when its folder is gone, as when a cleaner deletes the data folder
 while Yapfast runs, the write makes the folder again. While Discord is
 unreachable, an open channel shows what was saved, waits, and loads once
@@ -1009,7 +1017,7 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   attached, as `{channel}/{message}-{n}-{name}`. A file larger than the
   largest the settings allow for its kind, or when the folder switch is off,
   isn't downloaded. It has no limit on the whole and nothing prunes it,
-  unlike `discord-messages/`, which keeps each channel's newest 100 messages
+  unlike `MsgLogDataCache/`, which keeps each channel's newest 100 messages
   for the 300 channels used last.
 - Settings → Message Logger has the switches above, *Save messages and media*,
   which writes every message and its files, and the largest picture, GIF and

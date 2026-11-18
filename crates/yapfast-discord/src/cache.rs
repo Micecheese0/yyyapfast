@@ -6,8 +6,13 @@
 //!   messages and member lists show people by; and the member lists shown
 //!   lately. Calls and who is in voice are left out, since they're over by
 //!   then. Written at most every [`SAVE_DELAY`] while connected.
-//! - `discord-messages/`: each channel shown lately, its newest
-//!   [`CHANNEL_MESSAGES`] messages, for the [`CHANNELS`] used last.
+//! - `MsgLogDataCache/`, beside `MsgLogData` (see [`crate::msglog`]): each
+//!   channel shown lately, its newest [`CHANNEL_MESSAGES`] messages, for the
+//!   [`CHANNELS`] used last. Plain files, tied to no login and no key, and
+//!   not deleted when an account is unlinked or its token is lost, so what
+//!   the message log shows again, and the deleted and edited marks it
+//!   carries, don't depend on the credential store. They were once
+//!   `discord-messages/`, encrypted; [`load`] moves those it can read.
 //! - `discord-profiles/`: each profile shown lately, outside servers or in
 //!   one, as Discord last gave it, for the [`PROFILES`] shown last. A card
 //!   shows it at once while Discord's answer comes.
@@ -38,9 +43,10 @@
 //!   their pictures ahead of opening. Public — every account has the same
 //!   ones — so it is not sealed.
 //!
-//! The files name the login they belong to by a hash of the token, so another
-//! account linked meanwhile starts empty, and unlinking deletes them all.
-//! They're readable only by the user. The account, messages, profiles,
+//! The files but the messages' name the login they belong to by a hash of the
+//! token, so another account linked meanwhile starts empty, and unlinking
+//! deletes them all.
+//! They're readable only by the user. The account, profiles,
 //! favourite GIFs and previews are encrypted, with a key kept beside the
 //! token in the OS credential store (see [`sealed`]), so a backup or a disk
 //! read without it shows none of them. The pictures, public on Discord's
@@ -168,6 +174,7 @@ pub fn keep_in(file: PathBuf) {
     ) {
         let text = [self::file(), favorite_gifs_file()];
         let previews = previews();
+        let kept_messages = kept_messages_directory();
         // Pictures kept before the previews were apart, and encrypted,
         // have them among them: they go, out of the way first.
         let earlier = pictures.with_extension("earlier");
@@ -191,7 +198,9 @@ pub fn keep_in(file: PathBuf) {
                 }
             });
             prune(&gifs, GIFS_SIZE, usize::MAX);
-            prune(&messages, u64::MAX, CHANNELS);
+            if let Some(kept) = &kept_messages {
+                prune(kept, u64::MAX, CHANNELS);
+            }
             prune(&profiles, u64::MAX, PROFILES);
             // Videos played before Yapfast last closed.
             prune(&videos, 0, 0);
@@ -592,8 +601,16 @@ fn now() -> u64 {
         .unwrap_or_default()
 }
 
+/// Where the messages were kept before [`kept_messages_directory`]: sealed
+/// for a login.
 fn messages_directory() -> Option<PathBuf> {
     Some(file()?.with_file_name("discord-messages"))
+}
+
+/// Where the messages are kept: beside `MsgLogData`, in plain files tied to
+/// no login, which unlinking leaves be.
+fn kept_messages_directory() -> Option<PathBuf> {
+    Some(file()?.with_file_name("MsgLogDataCache"))
 }
 
 fn profiles_directory() -> Option<PathBuf> {
@@ -627,6 +644,7 @@ fn current_key() -> Option<Key> {
 pub(crate) fn load(token: &str, key: Option<Key>) -> Loaded {
     *lock(&LOGIN) = Some(hash(token));
     *lock(&KEY) = key;
+    migrate_messages();
     let Some(saved) =
         file().and_then(|file| read_sealed::<Saved>(&file, "the saved Discord account"))
     else {
@@ -642,6 +660,49 @@ pub(crate) fn load(token: &str, key: Option<Key>) -> Loaded {
         names: Names::restore(saved.names),
         lists: saved.lists,
     }
+}
+
+/// Moves the messages kept sealed in `discord-messages/` to the plain files
+/// of [`kept_messages_directory`]: each that this login's key opens is
+/// written there, unless the channel has a newer one already, and then goes
+/// from the old folder, which goes too once it's empty. One that doesn't
+/// open (another login's, or with no key) stays where it is, to move when
+/// that login is back; a write that fails leaves the old file, so nothing is
+/// lost before it's safe. Few small files, so it runs inline, once.
+fn migrate_messages() {
+    let Some(old) = messages_directory() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&old) else {
+        return;
+    };
+    for path in entries.filter_map(|entry| Some(entry.ok()?.path())) {
+        let Some(channel) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".json"))
+        else {
+            continue;
+        };
+        let Some(target) = channel_file(channel) else {
+            continue;
+        };
+        let Some(messages) = read_sealed::<Vec<Message>>(&path, "a saved Discord channel") else {
+            continue;
+        };
+        if !target.exists() {
+            let written = write_with(&target, |writer| {
+                Ok(serde_json::to_writer(writer, &messages)?)
+            });
+            if let Err(error) = written {
+                tracing::warn!(%error, "could not move a saved Discord channel");
+                continue;
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+    // Only an empty one goes.
+    let _ = std::fs::remove_dir(&old);
 }
 
 /// Discord refreshed the login to `token`: the files the one before kept
@@ -769,30 +830,46 @@ fn channel_file(channel: &str) -> Option<PathBuf> {
     if channel.is_empty() || !channel.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    Some(messages_directory()?.join(format!("{channel}.json")))
+    Some(kept_messages_directory()?.join(format!("{channel}.json")))
 }
 
-/// The messages kept of a channel for this login, oldest first.
+/// The messages kept of a channel, oldest first, whichever login saved
+/// them.
 pub fn messages(channel: &str) -> Vec<Message> {
     let Some(file) = channel_file(channel) else {
         return Vec::new();
     };
-    let Some(messages) = read_sealed(&file, "a saved Discord channel") else {
-        return Vec::new();
+    let opened = match std::fs::File::open(&file) {
+        Ok(opened) => opened,
+        Err(error) => {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(%error, "could not read a saved Discord channel");
+            }
+            return Vec::new();
+        }
+    };
+    let messages = match serde_json::from_reader(std::io::BufReader::new(opened)) {
+        Ok(messages) => messages,
+        Err(error) => {
+            tracing::warn!(%error, "could not read a saved Discord channel");
+            return Vec::new();
+        }
     };
     // Used now, so pruning keeps it longer.
     touch(&file);
     messages
 }
 
-/// Keeps a channel's newest [`CHANNEL_MESSAGES`] messages, oldest first. It
-/// writes to disk, so the async side calls it off its threads.
+/// Keeps a channel's newest [`CHANNEL_MESSAGES`] messages, oldest first, as a
+/// plain file written whole beside its place and then renamed to it, so one
+/// cut short by a crash never replaces the last good one. It writes to disk,
+/// so the async side calls it off its threads.
 pub fn save_messages(channel: &str, messages: Vec<Message>) {
     let Some(file) = channel_file(channel) else {
         return;
     };
     let newest = &messages[messages.len().saturating_sub(CHANNEL_MESSAGES)..];
-    let written = write_sealed(&file, &newest);
+    let written = write_with(&file, |writer| Ok(serde_json::to_writer(writer, &newest)?));
     if let Err(error) = written {
         tracing::warn!(%error, "could not save a Discord channel");
     }
@@ -1043,7 +1120,9 @@ fn prune(directory: &Path, size: u64, count: usize) {
     }
 }
 
-/// Deletes everything kept, as when unlinking.
+/// Deletes everything kept, as when unlinking, but the messages of
+/// `MsgLogDataCache`, which are no login's (those still sealed in the old
+/// `discord-messages/` go).
 pub fn forget() {
     for file in [
         file(),
@@ -1347,9 +1426,10 @@ mod tests {
         assert!(favorite_gifs().is_some());
         assert!(load("token", Some(KEY)).snapshot.servers.is_empty());
 
-        // Another login sees none of it.
+        // Another login sees none of it, but the messages, which are no
+        // login's.
         assert!(load("another", Some(KEY)).snapshot.servers.is_empty());
-        assert!(messages("40").is_empty());
+        assert_eq!(messages("40").len(), CHANNEL_MESSAGES);
         assert_eq!(profile("10", "2"), None);
         assert_eq!(favorite_gifs(), None);
         load("token", Some(KEY));
@@ -1357,9 +1437,31 @@ mod tests {
         keep_sticker_packs(vec![]);
         assert!(sticker_packs().is_some());
         std::fs::create_dir_all(gif_home().unwrap()).unwrap();
+
+        // Messages kept sealed before they had a folder of their own move
+        // there, this login's, and the channel's newer plain file stays.
+        let old = messages_directory().unwrap();
+        write_sealed(&old.join("42.json"), &vec![message(7)]).unwrap();
+        write_sealed(&old.join("40.json"), &vec![message(1)]).unwrap();
+        write_sealed(&old.join("43.json"), &vec![message(8)]).unwrap();
+        load("another", Some(KEY));
+        assert!(
+            old.join("43.json").exists() && messages("43").is_empty(),
+            "a login that isn't here moves nothing"
+        );
+        load("token", Some(KEY));
+        assert_eq!(messages("42")[0].id, "7");
+        assert_eq!(messages("43")[0].id, "8", "moved when its login is back");
+        assert_eq!(messages("40").len(), CHANNEL_MESSAGES, "the newer one stays");
+        assert!(!old.exists(), "the old folder goes once it's empty");
+
         forget();
         assert!(load("token", Some(KEY)).snapshot.servers.is_empty());
-        assert!(messages("40").is_empty());
+        assert_eq!(
+            messages("40").len(),
+            CHANNEL_MESSAGES,
+            "unlinking leaves the messages"
+        );
         assert_eq!(favorite_gifs(), None);
         assert!(!pictures().unwrap().exists() && !previews().unwrap().exists());
         assert!(!profiles_directory().unwrap().exists());

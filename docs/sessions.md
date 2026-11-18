@@ -61,12 +61,15 @@ with access as the same Linux user can also read it.
 
 Discord's token lives in the same credential store, with no file fallback,
 and so does the key of what Yapfast keeps to show while it connects: the
-account, recent messages, profiles, favourite GIFs and the previews of
+account, profiles, favourite GIFs and the previews of
 attachments and links, each file encrypted with XChaCha20-Poly1305
-(`crates/yapfast-discord/src/cache/sealed.rs`). The names of the messages'
-and profiles' files carry channel and user ids. Avatars, emoji and other
+(`crates/yapfast-discord/src/cache/sealed.rs`). The names of the profiles'
+files carry user ids. Avatars, emoji and other
 pictures public on Discord's CDN are kept plain, as is the video playing,
-deleted once it stops. Unlinking deletes the files and the key.
+deleted once it stops. Unlinking deletes the files and the key. The recent
+messages are not among them: `MsgLogDataCache/` keeps them as plain files,
+beside `MsgLogData`, tied to no login or key, so a lost token or an unlink
+leaves them; their names carry channel ids.
 
 Writes use a private temporary file, flush its contents and replace the prior
 file. Store passwords are preserved separately from active login credentials.

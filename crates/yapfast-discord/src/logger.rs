@@ -5,8 +5,8 @@
 //! [`Message::deleted`], and an edited one keeps what it said before in
 //! [`Message::history`]. Only messages Yapfast holds can be kept, which are
 //! those of the channels it has open and the newest of those it showed lately:
-//! the cache of `discord-messages/` (see [`crate::cache`]) writes them with
-//! these marks, encrypted, so they're still there after a restart. A ghost
+//! the cache of `MsgLogDataCache/` (see [`crate::cache`]) writes them with
+//! these marks, as plain files, so they're still there after a restart. A ghost
 //! ping is a kept message that mentions this account, which the timeline
 //! already highlights.
 //!
