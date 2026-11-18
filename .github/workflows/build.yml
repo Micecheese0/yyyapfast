@@ -1,5 +1,5 @@
 # Builds Yapfast for Windows and Linux in one run, on demand or on a
-# push to iced: Actions > Build > Run workflow. Nothing is published
+# push to Ice-custom: Actions > Build > Run workflow. Nothing is published
 # and no secrets are used; each platform's files are artifacts of the run.
 #
 #   windows   the installer (Yapfast-*-windows-x64-setup.exe) and the portable ZIP
@@ -14,7 +14,7 @@ name: Build
 on:
   workflow_dispatch:
   push:
-    branches: [iced]
+    branches: [Ice-custom]
 
 permissions:
   contents: read
