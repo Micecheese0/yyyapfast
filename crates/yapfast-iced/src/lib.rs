@@ -222,6 +222,7 @@ pub fn run(
     video::install();
     frames::install();
     fonts::install(TWEMOJI);
+    picker::warm_emoji();
     EXECUTOR
         .set(runtime.block_on(async { tokio::runtime::Handle::current() }))
         .ok();

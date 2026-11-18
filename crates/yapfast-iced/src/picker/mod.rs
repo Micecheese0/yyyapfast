@@ -17,7 +17,7 @@ mod gifs;
 pub mod kit;
 mod stickers;
 
-pub use emoji::drawn;
+pub use emoji::{drawn, warm as warm_emoji};
 use iced::{
     Color, Element, Length, Padding, Point, Size, Task,
     widget::{column, container, operation, scrollable::AbsoluteOffset, scrollable::Viewport},

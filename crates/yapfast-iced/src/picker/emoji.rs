@@ -24,7 +24,7 @@ use std::{
 
 use iced::{
     Alignment, Element, Length, Rectangle, Size, Task,
-    advanced::{graphics::text::cosmic_text, image::Handle},
+    advanced::image::Handle,
     widget::{Space, button, column, container, mouse_area, row, stack},
 };
 use yapfast_core::{
@@ -64,36 +64,56 @@ struct Category {
     emoji: Vec<&'static str>,
 }
 
+/// How many emoji are checked against the font under one hold of the font
+/// system, which text layout shares: the check shapes each one.
+const CHECKED_TOGETHER: usize = 32;
+
 /// Every category with the emoji Twemoji draws as one picture, in Unicode's
-/// order, up to Unicode 15.0; worked out once, the first time a picker
-/// opens.
-fn catalog(system: &mut cosmic_text::FontSystem) -> &'static [Category] {
+/// order, up to Unicode 15.0. Shaping some 3,700 emoji took the first
+/// picker to open a long hitch, so [`warm`] works it out at launch, off the
+/// window's thread, and gives the font system back between slices so the
+/// window's own text goes on meanwhile; a caller that comes first waits
+/// for it, as it would have done.
+fn shared_catalog() -> &'static [Category] {
     static CATALOG: OnceLock<Vec<Category>> = OnceLock::new();
-    if let Some(catalog) = CATALOG.get() {
-        return catalog;
-    }
-    let catalog = emojis::Group::iter()
-        .map(|group| {
-            let (icon, name) = names::category(group);
-            let emoji = group
-                .emojis()
-                .filter(|emoji| {
-                    emoji.unicode_version() <= names::NEWEST
-                        && paint::has_emoji(system, emoji.as_str())
-                })
-                .map(emojis::Emoji::as_str)
-                .collect();
-            Category { icon, name, emoji }
-        })
-        .collect();
-    CATALOG.get_or_init(|| catalog)
+    CATALOG.get_or_init(|| {
+        emojis::Group::iter()
+            .map(|group| {
+                let (icon, name) = names::category(group);
+                let candidates: Vec<&'static str> = group
+                    .emojis()
+                    .filter(|emoji| emoji.unicode_version() <= names::NEWEST)
+                    .map(emojis::Emoji::as_str)
+                    .collect();
+                let mut emoji = Vec::with_capacity(candidates.len());
+                for slice in candidates.chunks(CHECKED_TOGETHER) {
+                    let mut system = iced::advanced::graphics::text::font_system()
+                        .write()
+                        .expect("font system");
+                    emoji.extend(
+                        slice
+                            .iter()
+                            .copied()
+                            .filter(|key| paint::has_emoji(system.raw(), key)),
+                    );
+                }
+                Category { icon, name, emoji }
+            })
+            .collect()
+    })
 }
 
-fn shared_catalog() -> &'static [Category] {
-    let mut system = iced::advanced::graphics::text::font_system()
-        .write()
-        .expect("font system");
-    catalog(system.raw())
+/// Works the catalog out on a thread of its own, once the fonts are
+/// installed, so no picker or message waits for it.
+pub fn warm() {
+    let started = std::thread::Builder::new()
+        .name("emoji-catalog".into())
+        .spawn(|| {
+            drawn("");
+        });
+    if let Err(error) = started {
+        tracing::warn!(%error, "could not start the emoji catalog's thread");
+    }
 }
 
 /// Whether the client draws this Unicode emoji: one of the catalog's,
@@ -325,7 +345,12 @@ impl Picker {
             }
             for (index, (face, usable)) in cells.into_iter().enumerate() {
                 let (column, line) = (index % columns, index / columns);
-                let favorite = starred.contains(face.key().as_str());
+                // A Unicode emoji is its own key; only a custom one's is made.
+                let favorite = !starred.is_empty()
+                    && match &face {
+                        Face::Unicode(key) => starred.contains(key),
+                        Face::Custom(_) => starred.contains(face.key().as_str()),
+                    };
                 grid.place(
                     Rectangle::new(
                         iced::Point::new(INSET + column as f32 * CELL, top + line as f32 * CELL),
