@@ -2495,9 +2495,7 @@ impl Api {
             Some(to) => format!("bytes={from}-{}", to.saturating_sub(1)),
             None => format!("bytes={from}-"),
         };
-        let response = self
-            .send_file(self.http.get(url).header(header::RANGE, range))
-            .await?;
+        let response = self.fetch_file(url, Some(range)).await?;
         let (start, size) = if response.status() == StatusCode::PARTIAL_CONTENT {
             response
                 .headers()
@@ -2539,7 +2537,38 @@ impl Api {
 
     /// Asks for a file, giving up if Discord doesn't answer within [`STALL`].
     async fn get_file(&self, url: &str) -> Result<Response> {
-        self.send_file(self.http.get(url)).await
+        self.fetch_file(url, None).await
+    }
+
+    /// [`Self::get_file`], for the part of it `range` names when given. An
+    /// attachment the CDN no longer has (an old link, or a signature that
+    /// ran out) is asked for again from the media proxy at the same path, as
+    /// the web client's own links to it go, with its signature and then
+    /// without it, before the CDN's answer is the error.
+    async fn fetch_file(&self, url: &str, range: Option<String>) -> Result<Response> {
+        let get = |url: &str| {
+            let request = self.http.get(url);
+            match &range {
+                Some(range) => request.header(header::RANGE, range.clone()),
+                None => request,
+            }
+        };
+        let error = match self.send_file(get(url)).await {
+            Ok(response) => return Ok(response),
+            Err(error) => error,
+        };
+        let gone = error
+            .downcast_ref::<Refused>()
+            .is_some_and(|refused| matches!(refused.0.as_u16(), 403 | 404 | 410));
+        if gone {
+            for other in media_proxy_urls(url) {
+                if let Ok(response) = self.send_file(get(&other)).await {
+                    tracing::debug!(url = %other, "an attachment came from the media proxy");
+                    return Ok(response);
+                }
+            }
+        }
+        Err(error)
     }
 
     /// Sends a request for a file as [`Self::get_file`] does.
@@ -2976,6 +3005,23 @@ fn allowed(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Where the media proxy has the attachment at `url` on Discord's CDN: the
+/// same path on `media.discordapp.net`, with the link's query (its signature)
+/// and then without it. None for anything but an attachment on the CDN.
+fn media_proxy_urls(url: &str) -> Vec<String> {
+    let Some(rest) = url.strip_prefix("https://cdn.discordapp.com/") else {
+        return Vec::new();
+    };
+    if !rest.starts_with("attachments/") {
+        return Vec::new();
+    }
+    let proxy = format!("https://media.discordapp.net/{rest}");
+    match proxy.split_once('?') {
+        Some((bare, _)) => vec![proxy.clone(), bare.to_owned()],
+        None => vec![proxy],
+    }
+}
+
 /// Whether `url` is on Discord's CDN or its media proxy, which serves
 /// embeds' pictures from `images-ext-1.discordapp.net` and the like.
 fn discord_file(url: &str) -> bool {
@@ -2995,6 +3041,29 @@ fn discord_file(url: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_gone_attachment_is_asked_for_again_from_the_media_proxy() {
+        use super::media_proxy_urls;
+        assert_eq!(
+            media_proxy_urls("https://cdn.discordapp.com/attachments/1/2/a.png?ex=3&is=4&hm=5"),
+            [
+                "https://media.discordapp.net/attachments/1/2/a.png?ex=3&is=4&hm=5",
+                "https://media.discordapp.net/attachments/1/2/a.png"
+            ]
+        );
+        assert_eq!(
+            media_proxy_urls("https://cdn.discordapp.com/attachments/1/2/a.png"),
+            ["https://media.discordapp.net/attachments/1/2/a.png"]
+        );
+        for other in [
+            "https://cdn.discordapp.com/avatars/1/a.png",
+            "https://media.discordapp.net/attachments/1/2/a.png",
+            "https://example.com/attachments/1/2/a.png",
+        ] {
+            assert!(media_proxy_urls(other).is_empty(), "{other}");
+        }
+    }
+
     #[test]
     fn a_poll_goes_as_discords_client_sends_it() {
         use super::{NewAnswer, NewPoll};

@@ -1014,7 +1014,11 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   open one, and holds nothing in memory: `messages/{channel}.jsonl` has a
   line for each message that came, edit and deletion, and `media/images`,
   `media/gifs` and `media/videos` hold the pictures, GIFs and videos
-  attached, as `{channel}/{message}-{n}-{name}`. A file larger than the
+  attached, as `{channel}/{message}-{n}-{name}`. A file the CDN answers 403,
+  404 or 410 for, as an old link or one whose signature ran out, is asked for
+  again from `media.discordapp.net` at the same path, with the signature and
+  then without (`Api::fetch_file`, for every attachment download, a video's
+  parts included); the proxy may not have it either. A file larger than the
   largest the settings allow for its kind, or when the folder switch is off,
   isn't downloaded. It has no limit on the whole and nothing prunes it,
   unlike `MsgLogDataCache/`, which keeps each channel's newest 100 messages
