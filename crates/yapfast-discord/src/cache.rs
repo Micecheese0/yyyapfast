@@ -100,8 +100,14 @@ const GIFS_SIZE: u64 = 200 * 1024 * 1024;
 const LARGEST_PICTURE: usize = 8 * 1024 * 1024;
 /// The most channels whose messages are kept; the least lately used go.
 const CHANNELS: usize = 300;
-/// Of each channel, the newest messages kept.
-pub const CHANNEL_MESSAGES: usize = 100;
+/// Of each channel, the newest messages kept. They are on disk only: a
+/// channel that opens takes in its newest few, and the older ones are read
+/// back when the timeline scrolls up to them, to find those that were
+/// deleted meanwhile.
+pub const CHANNEL_MESSAGES: usize = 2000;
+/// The most the kept messages take, all channels together; the least lately
+/// used channels go first. A message takes about 2 KB.
+const MESSAGES_SIZE: u64 = 512 * 1024 * 1024;
 /// The most profiles kept; the least lately shown go. One takes 1-5 KB.
 const PROFILES: usize = 500;
 
@@ -199,7 +205,7 @@ pub fn keep_in(file: PathBuf) {
             });
             prune(&gifs, GIFS_SIZE, usize::MAX);
             if let Some(kept) = &kept_messages {
-                prune(kept, u64::MAX, CHANNELS);
+                prune(kept, MESSAGES_SIZE, CHANNELS);
             }
             prune(&profiles, u64::MAX, PROFILES);
             // Videos played before Yapfast last closed.
@@ -690,9 +696,13 @@ fn migrate_messages() {
         let Some(messages) = read_sealed::<Vec<Message>>(&path, "a saved Discord channel") else {
             continue;
         };
-        if !target.exists() {
+        if !target.exists() && !array_file(channel).is_some_and(|array| array.exists()) {
             let written = write_with(&target, |writer| {
-                Ok(serde_json::to_writer(writer, &messages)?)
+                for message in &messages {
+                    serde_json::to_writer(&mut *writer, message)?;
+                    writer.write_all(b"\n")?;
+                }
+                Ok(())
             });
             if let Err(error) = written {
                 tracing::warn!(%error, "could not move a saved Discord channel");
@@ -824,54 +834,134 @@ pub(crate) async fn keep(mut snapshots: watch::Receiver<Arc<Snapshot>>, names: A
     }
 }
 
-/// Where a channel's messages are kept. Channel ids are numbers, which keeps
-/// the name a plain file name.
+/// Where a channel's messages are kept: a line of JSON for each message,
+/// oldest first, so the newest few, or those between two ids, are read
+/// without parsing the rest. Channel ids are numbers, which keeps the name a
+/// plain file name.
 fn channel_file(channel: &str) -> Option<PathBuf> {
     if channel.is_empty() || !channel.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    Some(kept_messages_directory()?.join(format!("{channel}.json")))
+    Some(kept_messages_directory()?.join(format!("{channel}.jsonl")))
 }
 
-/// The messages kept of a channel, oldest first, whichever login saved
-/// them.
-pub fn messages(channel: &str) -> Vec<Message> {
-    let Some(file) = channel_file(channel) else {
-        return Vec::new();
-    };
-    let opened = match std::fs::File::open(&file) {
-        Ok(opened) => opened,
-        Err(error) => {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(%error, "could not read a saved Discord channel");
-            }
-            return Vec::new();
+/// Where they were kept as one JSON array, as `MsgLogDataCache` first wrote
+/// them; read as the lines are, and gone once the channel is saved again.
+fn array_file(channel: &str) -> Option<PathBuf> {
+    Some(channel_file(channel)?.with_extension("json"))
+}
+
+/// The id a line of a channel's file starts with: [`Message`]'s first field.
+fn line_id(line: &str) -> Option<u64> {
+    line.strip_prefix("{\"id\":\"")?
+        .split_once('"')?
+        .0
+        .parse()
+        .ok()
+}
+
+/// A channel's kept messages as the lines of its file, which an array of the
+/// earlier form is made into. None when it has none. Read now, so pruning
+/// keeps it longer.
+fn kept_text(channel: &str) -> Option<String> {
+    let file = channel_file(channel)?;
+    match std::fs::read_to_string(&file) {
+        Ok(text) => {
+            touch(&file);
+            return Some(text);
         }
-    };
-    let messages = match serde_json::from_reader(std::io::BufReader::new(opened)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            tracing::warn!(%error, "could not read a saved Discord channel");
+            return None;
+        }
+    }
+    let array = array_file(channel)?;
+    let opened = std::fs::File::open(&array).ok()?;
+    let messages: Vec<Message> = match serde_json::from_reader(std::io::BufReader::new(opened)) {
         Ok(messages) => messages,
         Err(error) => {
             tracing::warn!(%error, "could not read a saved Discord channel");
-            return Vec::new();
+            return None;
         }
     };
-    // Used now, so pruning keeps it longer.
-    touch(&file);
-    messages
+    touch(&array);
+    Some(
+        messages
+            .iter()
+            .filter_map(|message| serde_json::to_string(message).ok())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
-/// Keeps a channel's newest [`CHANNEL_MESSAGES`] messages, oldest first, as a
-/// plain file written whole beside its place and then renamed to it, so one
-/// cut short by a crash never replaces the last good one. It writes to disk,
-/// so the async side calls it off its threads.
+/// The newest `newest` messages kept of a channel, oldest first, whichever
+/// login saved them.
+pub fn messages(channel: &str, newest: usize) -> Vec<Message> {
+    let Some(text) = kept_text(channel) else {
+        return Vec::new();
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(newest)..]
+        .iter()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// The messages kept of a channel whose ids are from `from` to `to`, both
+/// included, oldest first. It reads the file and parses only those.
+pub fn messages_between(channel: &str, from: u64, to: u64) -> Vec<Message> {
+    let Some(text) = kept_text(channel) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter(|line| line_id(line).is_some_and(|id| (from..=to).contains(&id)))
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// Keeps a channel's messages, `messages` oldest first, which are the newest
+/// the window holds. What the file has older than them stays, so it reaches
+/// further back than memory does, up to [`CHANNEL_MESSAGES`] in all; they
+/// replace what it had from their first on, so one the window let go of is
+/// gone from it too. Written whole beside its place and then renamed to it,
+/// so one cut short by a crash never replaces the last good one. It reads and
+/// writes the file, so the async side calls it off its threads.
 pub fn save_messages(channel: &str, messages: Vec<Message>) {
     let Some(file) = channel_file(channel) else {
         return;
     };
-    let newest = &messages[messages.len().saturating_sub(CHANNEL_MESSAGES)..];
-    let written = write_with(&file, |writer| Ok(serde_json::to_writer(writer, &newest)?));
-    if let Err(error) = written {
-        tracing::warn!(%error, "could not save a Discord channel");
+    let first = messages
+        .first()
+        .and_then(|message| message.id.parse::<u64>().ok());
+    let mut lines: Vec<String> = match (first, kept_text(channel)) {
+        (Some(first), Some(text)) => text
+            .lines()
+            .filter(|line| line_id(line).is_some_and(|id| id < first))
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    };
+    lines.extend(
+        messages
+            .iter()
+            .filter_map(|message| serde_json::to_string(message).ok()),
+    );
+    let skip = lines.len().saturating_sub(CHANNEL_MESSAGES);
+    let written = write_with(&file, |writer| {
+        for line in &lines[skip..] {
+            writer.write_all(line.as_bytes())?;
+            writer.write_all(b"\n")?;
+        }
+        Ok(())
+    });
+    match written {
+        Ok(()) => {
+            if let Some(array) = array_file(channel) {
+                let _ = std::fs::remove_file(array);
+            }
+        }
+        Err(error) => tracing::warn!(%error, "could not save a Discord channel"),
     }
 }
 
@@ -1321,10 +1411,42 @@ mod tests {
             "40",
             (1..=CHANNEL_MESSAGES as u64 + 5).map(message).collect(),
         );
-        let kept = messages("40");
+        let kept = messages("40", usize::MAX);
         assert_eq!(kept.len(), CHANNEL_MESSAGES);
         assert_eq!(kept[0].id, "6", "the oldest go");
-        assert!(messages("../40").is_empty() && messages("41").is_empty());
+        assert!(messages("../40", usize::MAX).is_empty() && messages("41", usize::MAX).is_empty());
+        // A line starts with its message's id, which the file is read by.
+        assert_eq!(
+            line_id(&serde_json::to_string(&message(123)).unwrap()),
+            Some(123)
+        );
+        let ids = |messages: Vec<Message>| messages.into_iter().map(|m| m.id).collect::<Vec<_>>();
+        // The newest few, and those between two ids.
+        assert_eq!(
+            ids(messages("40", 2)),
+            [
+                (CHANNEL_MESSAGES as u64 + 4).to_string(),
+                (CHANNEL_MESSAGES as u64 + 5).to_string()
+            ]
+        );
+        assert_eq!(ids(messages_between("40", 10, 12)), ["10", "11", "12"]);
+        // Memory keeps only its newest, so what the file has older stays, and
+        // one gone from the window (2004) is gone from the file.
+        save_messages("40", [2003, 2005, 2006].map(message).to_vec());
+        let kept = ids(messages("40", usize::MAX));
+        assert_eq!(kept.len(), CHANNEL_MESSAGES);
+        assert_eq!(kept[0], "6", "1997 older and 3 newer: no more than it holds");
+        assert_eq!(kept[kept.len() - 4..], ["2002", "2003", "2005", "2006"]);
+        // The array the first MsgLogDataCache wrote reads as lines, and goes
+        // when the channel is saved.
+        let legacy = array_file("44").unwrap();
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, serde_json::to_vec(&vec![message(5), message(6)]).unwrap())
+            .unwrap();
+        assert_eq!(ids(messages("44", usize::MAX)), ["5", "6"]);
+        save_messages("44", vec![message(6), message(7)]);
+        assert_eq!(ids(messages("44", usize::MAX)), ["5", "6", "7"]);
+        assert!(!legacy.exists());
         // A channel kept before Yapfast encrypted them goes.
         let earlier = messages_directory().unwrap().join("41.json");
         std::fs::write(&earlier, br#"{"login":"","messages":[]}"#).unwrap();
@@ -1421,7 +1543,7 @@ mod tests {
             load("refreshed", Some(KEY)).snapshot.servers[0].name,
             "Server"
         );
-        assert_eq!(messages("40").len(), CHANNEL_MESSAGES);
+        assert_eq!(messages("40", usize::MAX).len(), CHANNEL_MESSAGES);
         assert_eq!(profile("10", "2"), Some(bob("Bobby")));
         assert!(favorite_gifs().is_some());
         assert!(load("token", Some(KEY)).snapshot.servers.is_empty());
@@ -1429,7 +1551,7 @@ mod tests {
         // Another login sees none of it, but the messages, which are no
         // login's.
         assert!(load("another", Some(KEY)).snapshot.servers.is_empty());
-        assert_eq!(messages("40").len(), CHANNEL_MESSAGES);
+        assert_eq!(messages("40", usize::MAX).len(), CHANNEL_MESSAGES);
         assert_eq!(profile("10", "2"), None);
         assert_eq!(favorite_gifs(), None);
         load("token", Some(KEY));
@@ -1446,19 +1568,19 @@ mod tests {
         write_sealed(&old.join("43.json"), &vec![message(8)]).unwrap();
         load("another", Some(KEY));
         assert!(
-            old.join("43.json").exists() && messages("43").is_empty(),
+            old.join("43.json").exists() && messages("43", usize::MAX).is_empty(),
             "a login that isn't here moves nothing"
         );
         load("token", Some(KEY));
-        assert_eq!(messages("42")[0].id, "7");
-        assert_eq!(messages("43")[0].id, "8", "moved when its login is back");
-        assert_eq!(messages("40").len(), CHANNEL_MESSAGES, "the newer one stays");
+        assert_eq!(messages("42", usize::MAX)[0].id, "7");
+        assert_eq!(messages("43", usize::MAX)[0].id, "8", "moved when its login is back");
+        assert_eq!(messages("40", usize::MAX).len(), CHANNEL_MESSAGES, "the newer one stays");
         assert!(!old.exists(), "the old folder goes once it's empty");
 
         forget();
         assert!(load("token", Some(KEY)).snapshot.servers.is_empty());
         assert_eq!(
-            messages("40").len(),
+            messages("40", usize::MAX).len(),
             CHANNEL_MESSAGES,
             "unlinking leaves the messages"
         );

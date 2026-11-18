@@ -155,10 +155,22 @@ Yapfast starts from Discord as it last saw it, kept in the data directory by
   them when the connection drops, so it shows again at once after
   reconnecting.
 - `MsgLogDataCache/`, beside `MsgLogData`, holds, for each channel shown
-  lately, its newest 100 messages, written within 20 seconds of a change, when
-  the channel leaves the 40 kept in memory, and when Yapfast closes. The 300
-  channels used last are kept. Opening a channel shows its saved messages, and
-  the latest page fits in as it does for a channel kept in memory. Unlike the
+  lately, its newest 2,000 messages (`cache::CHANNEL_MESSAGES`), written
+  within 20 seconds of a change, when the channel leaves the 40 kept in
+  memory, and when Yapfast closes. The 300 channels used last are kept, and
+  past 512 MiB in all the least lately used go; a message takes about 2 KB.
+  A channel is a file of one JSON line for each message, oldest first. Memory
+  holds only its newest 200: opening a channel reads those, and the latest
+  page fits in as it does for a channel kept in memory. A save keeps what the
+  file has older than the first message memory holds, so the file reaches
+  back past memory, and replaces the rest. When the timeline scrolls up and
+  a page of earlier history loads, the messages the file has in that page's
+  span that the page lacks were deleted while Yapfast wasn't following the
+  channel: with *Keep deleted messages* on they come back, marked, and the
+  log writes them down deleted (`OpenChannel::disk_lost`); the page is the
+  proof, so messages deeper than the user has scrolled aren't checked. A file
+  of the earlier array form (`{channel}.json`) is read as lines and goes when
+  the channel is saved. Unlike the
   rest of this list they are plain files, tied to no login and no key in the
   credential store, so unlinking the account, signing in as another, or losing
   the token leaves them (anyone who can read the data folder can read them, as
@@ -1030,7 +1042,7 @@ Messages, each switch off until turned on (`yapfast-discord/src/logger.rs`;
   time it went isn't known. A file larger than the
   largest the settings allow for its kind, or when the folder switch is off,
   isn't downloaded. It has no limit on the whole and nothing prunes it,
-  unlike `MsgLogDataCache/`, which keeps each channel's newest 100 messages
+  unlike `MsgLogDataCache/`, which keeps each channel's newest 2,000 messages
   for the 300 channels used last.
 - Settings → Message Logger has the switches above, *Save messages and media*,
   which writes every message and its files, and the largest picture, GIF and

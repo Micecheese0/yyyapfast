@@ -255,7 +255,9 @@ impl OpenChannel {
         {
             open.members_of = parent;
         }
-        for message in yapfast_discord::cache::messages(&open.channel) {
+        // Only its newest: the disk keeps more, read back as the timeline
+        // scrolls up to it.
+        for message in yapfast_discord::cache::messages(&open.channel, KEPT_MESSAGES) {
             open.shown.messages.insert(message.order(), message);
             open.loaded = true;
         }
@@ -452,9 +454,13 @@ impl OpenChannel {
         // The log writes down what it hasn't of the page: messages that came
         // while Yapfast wasn't running. Only when it's on, or the page would
         // be copied for nothing.
-        let guild = Some(self.guild.as_str()).filter(|guild| !guild.is_empty());
+        let guild = (!self.guild.is_empty()).then(|| self.guild.clone());
         if yapfast_discord::msglog::logging() {
-            yapfast_discord::msglog::backfill(guild, &self.channel, page.messages.clone());
+            yapfast_discord::msglog::backfill(
+                guild.as_deref(),
+                &self.channel,
+                page.messages.clone(),
+            );
         }
         match load {
             Load::Latest => {
@@ -463,7 +469,7 @@ impl OpenChannel {
                 let lost = run.fit(&page);
                 // Kept messages the page lacks, deleted while Yapfast wasn't
                 // following: the log writes them down deleted.
-                yapfast_discord::msglog::lost(guild, &self.channel, lost);
+                yapfast_discord::msglog::lost(guild.as_deref(), &self.channel, lost);
                 // Only a page that's the whole channel says where it starts:
                 // older messages kept stay before a full one.
                 if !page.full {
@@ -490,7 +496,11 @@ impl OpenChannel {
             }
             Load::Earlier => {
                 self.loading_earlier = false;
+                // Where the page was asked from, before it moves.
+                let anchor = self.shown.earliest();
                 self.shown.started(&page);
+                let lost = self.disk_lost(anchor, &page);
+                yapfast_discord::msglog::lost(guild.as_deref(), &self.channel, lost);
                 for message in page.messages {
                     self.insert(message);
                 }
@@ -785,6 +795,41 @@ impl OpenChannel {
         }
         self.shown.keep_newest(keep);
         true
+    }
+
+    /// The messages the disk kept in the span of a page of earlier history,
+    /// from where it was asked, that the page lacks: they were deleted while
+    /// Yapfast wasn't following the channel, as one of the latest page is.
+    /// The disk keeps further back than memory does ([`cache::CHANNEL_MESSAGES`]),
+    /// and scrolling up is when those are checked: the page is the proof.
+    /// With the logger keeping deleted messages they come back, marked, and
+    /// are given for the message log to write down; without it, nothing
+    /// changes. Those already marked come back too, to show again.
+    ///
+    /// [`cache::CHANNEL_MESSAGES`]: yapfast_discord::cache::CHANNEL_MESSAGES
+    fn disk_lost(&mut self, anchor: Option<u64>, page: &Page) -> Vec<Message> {
+        let Some(anchor) = anchor else {
+            return Vec::new();
+        };
+        let from = page.oldest.filter(|_| page.full).unwrap_or(0);
+        let listed: HashSet<u64> = page.messages.iter().map(Message::order).collect();
+        let mut lost = Vec::new();
+        for mut message in
+            yapfast_discord::cache::messages_between(&self.channel, from, anchor.saturating_sub(1))
+        {
+            if listed.contains(&message.order()) || message.ephemeral {
+                continue;
+            }
+            if !message.deleted {
+                if !yapfast_discord::logger::keeps_deleted(&message) {
+                    continue;
+                }
+                message.deleted = true;
+                lost.push(message.clone());
+            }
+            self.insert(message);
+        }
+        lost
     }
 
     /// Shows the message at once and sends it in the background.
