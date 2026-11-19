@@ -36,6 +36,72 @@ fn the_picker_finds_every_emoji_by_id_and_says_which_it_may_use() {
 
 #[test]
 #[cfg(feature = "discord")]
+fn the_picker_lays_emoji_out_by_place_and_makes_them_as_the_sets_do() {
+    use std::collections::HashSet;
+    use yapfast_discord::{
+        ready::{Emoji, Server},
+        service::{Snapshot, Status},
+    };
+    let mut app = connected();
+    let emoji = |id: &str, name: &str, animated, available| Emoji {
+        id: id.into(),
+        name: name.into(),
+        animated,
+        available,
+    };
+    app.apply(discord_event(Snapshot {
+        status: Status::Online,
+        servers: vec![
+            MarkedServer::from(Server {
+                id: "10".into(),
+                name: "Elsewhere".into(),
+                emojis: vec![
+                    emoji("5", "Talk", false, true),
+                    emoji("6", "party", true, false),
+                    emoji("7", "Party_Time", true, true),
+                ]
+                .into(),
+                ..Default::default()
+            }),
+            MarkedServer::from(Server {
+                id: "11".into(),
+                name: "Gone".into(),
+                emojis: vec![emoji("8", "gone", false, false)].into(),
+                ..Default::default()
+            }),
+        ],
+        ..Default::default()
+    }));
+    let starred: HashSet<&str> = ["7"].into_iter().collect();
+    let wanted: HashSet<&str> = ["5"].into_iter().collect();
+    let (shelves, named) = app.emoji_shelves(&starred, &wanted);
+    // A server with no available emoji has no shelf, and an unavailable
+    // emoji no place on one.
+    assert_eq!(shelves.len(), 1);
+    assert_eq!(shelves[0].server, "Elsewhere");
+    assert_eq!(shelves[0].emoji, vec![(0, false), (2, true)]);
+    assert_eq!(named.len(), 1);
+    assert_eq!(named[0].id, "5");
+    // Made from their places, they are the sets' own.
+    let sets = app.emoji_sets();
+    let make = app.emoji_maker();
+    let made: Vec<_> = shelves[0]
+        .emoji
+        .iter()
+        .filter_map(|&(place, _)| make(shelves[0].place, place as usize))
+        .collect();
+    assert_eq!(made, sets[0].emoji);
+    assert!(make(shelves[0].place, 1).is_none(), "not available");
+    assert!(make(9, 0).is_none(), "no such server");
+    // A search finds them by part of a name, whatever its case.
+    let found = app.emoji_matching("part");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, "7");
+    assert!(app.emoji_matching("zzz").is_empty());
+}
+
+#[test]
+#[cfg(feature = "discord")]
 fn an_emoji_names_the_server_that_lists_it() {
     use yapfast_discord::ready::{Emoji, Server};
     use yapfast_discord::service::{Snapshot, Status};

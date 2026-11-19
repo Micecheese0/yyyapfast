@@ -3007,6 +3007,36 @@ fn tag_badge(cosmetics: Cosmetics, tag: &Option<chat::ServerTag>) -> Option<&str
     cosmetics.tag(tag.as_ref())?.badge.as_deref()
 }
 
+/// A server's emoji as the pickers have it, saying whether this account may
+/// use it where it is writing: its own server's, but animated ones need
+/// Nitro, and another server's `external` says; with `bypass` every one
+/// is usable (see [`Application::emoji_sets`]).
+#[cfg(feature = "discord")]
+fn emoji_made(
+    emoji: &yapfast_discord::ready::Emoji,
+    ours: bool,
+    nitro: bool,
+    external: bool,
+    bypass: bool,
+) -> chat::CustomEmoji {
+    chat::CustomEmoji {
+        text: format!(":{}:", emoji.name),
+        id: emoji.id.clone(),
+        animated: emoji.animated,
+        usable: bypass
+            || if ours {
+                nitro || !emoji.animated
+            } else {
+                external
+            },
+        picture: yapfast_discord::ready::custom_emoji(
+            &emoji.id,
+            emoji.animated,
+            chat::EMOJI_PICTURE_SIZE,
+        ),
+    }
+}
+
 /// Discord's CDN keeps custom emoji under /emojis/.
 fn is_custom_emoji(url: &str) -> bool {
     url.contains("/emojis/")
@@ -5035,7 +5065,7 @@ impl Application {
         if let Some(snapshot) = &self.discord {
             use std::hash::Hash;
             let (here, nitro, external) = self.emoji_rules(snapshot);
-            (here, nitro, external).hash(&mut hasher);
+            (here, nitro, external, self.state.bypass.emoji).hash(&mut hasher);
             for server in &snapshot.servers {
                 (&server.id, &server.name, &server.icon).hash(&mut hasher);
                 for emoji in server.emojis.iter().filter(|emoji| emoji.available) {
@@ -5076,22 +5106,7 @@ impl Application {
                             .emojis
                             .iter()
                             .filter(|emoji| emoji.available)
-                            .map(|emoji| chat::CustomEmoji {
-                                text: format!(":{}:", emoji.name),
-                                id: emoji.id.clone(),
-                                animated: emoji.animated,
-                                usable: bypass
-                                    || if ours {
-                                        nitro || !emoji.animated
-                                    } else {
-                                        external
-                                    },
-                                picture: yapfast_discord::ready::custom_emoji(
-                                    &emoji.id,
-                                    emoji.animated,
-                                    chat::EMOJI_PICTURE_SIZE,
-                                ),
-                            })
+                            .map(|emoji| emoji_made(emoji, ours, nitro, external, bypass))
                             .collect(),
                     }
                 })
@@ -5100,6 +5115,113 @@ impl Application {
         }
         let _ = bypass;
         vec![]
+    }
+
+    /// Where the servers' available emoji sit, as [`Application::emoji_sets`]
+    /// orders them, without making any: the picker lays out thousands of
+    /// tiles from this, where making each emoji's three strings took a
+    /// third of a second on a large account. `starred` and `wanted` are
+    /// emoji ids: those in `starred` are flagged as favourites, and those
+    /// in `wanted` come back made, which the picker's own lists need.
+    pub fn emoji_shelves(
+        &self,
+        starred: &HashSet<&str>,
+        wanted: &HashSet<&str>,
+    ) -> (Vec<chat::EmojiShelf>, Vec<chat::CustomEmoji>) {
+        #[cfg(feature = "discord")]
+        if let Some(snapshot) = &self.discord {
+            let (here, nitro, external) = self.emoji_rules(snapshot);
+            let bypass = self.state.bypass.emoji;
+            let mut servers: Vec<_> = snapshot.servers.iter().enumerate().collect();
+            servers.sort_by_key(|(_, server)| Some(server.id.as_str()) != here);
+            let mut made = Vec::new();
+            let shelves = servers
+                .into_iter()
+                .filter_map(|(place, server)| {
+                    let ours = Some(server.id.as_str()) == here;
+                    let mut emoji = Vec::new();
+                    for (index, one) in server.emojis.iter().enumerate() {
+                        if !one.available {
+                            continue;
+                        }
+                        let id = one.id.as_str();
+                        emoji.push((index as u32, !starred.is_empty() && starred.contains(id)));
+                        if !wanted.is_empty() && wanted.contains(id) {
+                            made.push(emoji_made(one, ours, nitro, external, bypass));
+                        }
+                    }
+                    (!emoji.is_empty()).then(|| chat::EmojiShelf {
+                        server: server.name.clone(),
+                        icon: server.icon.clone(),
+                        place,
+                        emoji,
+                    })
+                })
+                .collect();
+            return (shelves, made);
+        }
+        let _ = (starred, wanted);
+        (Vec::new(), Vec::new())
+    }
+
+    /// A way to make one server's emoji by its place and the emoji's
+    /// place in it, as [`Application::emoji_shelves`] gives them, saying
+    /// whether this account may use it as [`Application::emoji_sets`] does.
+    /// What may be used is worked out once here, not for each emoji.
+    #[cfg(feature = "discord")]
+    pub fn emoji_maker(&self) -> impl Fn(usize, usize) -> Option<chat::CustomEmoji> + '_ {
+        let rules = self
+            .discord
+            .as_ref()
+            .map(|snapshot| (snapshot, self.emoji_rules(snapshot)));
+        let bypass = self.state.bypass.emoji;
+        move |place, emoji| {
+            let &(snapshot, (here, nitro, external)) = rules.as_ref()?;
+            let server = snapshot.servers.get(place)?;
+            let one = server.emojis.get(emoji).filter(|one| one.available)?;
+            let ours = Some(server.id.as_str()) == here;
+            Some(emoji_made(one, ours, nitro, external, bypass))
+        }
+    }
+
+    #[cfg(not(feature = "discord"))]
+    pub fn emoji_maker(&self) -> impl Fn(usize, usize) -> Option<chat::CustomEmoji> + '_ {
+        |_, _| None
+    }
+
+    /// The available emoji whose name holds `query`, lowercase, in the
+    /// order of [`Application::emoji_sets`], made for those alone: a search
+    /// of thousands of emoji made, and lowercased, each of them.
+    pub fn emoji_matching(&self, query: &str) -> Vec<chat::CustomEmoji> {
+        #[cfg(feature = "discord")]
+        if let Some(snapshot) = &self.discord {
+            let (here, nitro, external) = self.emoji_rules(snapshot);
+            let bypass = self.state.bypass.emoji;
+            let mut servers: Vec<_> = snapshot.servers.iter().collect();
+            servers.sort_by_key(|server| Some(server.id.as_str()) != here);
+            let needle = query.as_bytes();
+            return servers
+                .into_iter()
+                .flat_map(|server| {
+                    let ours = Some(server.id.as_str()) == here;
+                    server
+                        .emojis
+                        .iter()
+                        .filter(|one| {
+                            one.available
+                                && (needle.is_empty()
+                                    || one
+                                        .name
+                                        .as_bytes()
+                                        .windows(needle.len())
+                                        .any(|window| window.eq_ignore_ascii_case(needle)))
+                        })
+                        .map(move |one| emoji_made(one, ours, nitro, external, bypass))
+                })
+                .collect();
+        }
+        let _ = query;
+        Vec::new()
     }
 
     /// Emoji in the timeline and thread rows reported by the UI's viewports.

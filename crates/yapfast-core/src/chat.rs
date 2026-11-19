@@ -1476,6 +1476,22 @@ pub struct EmojiSet {
     pub emoji: Vec<CustomEmoji>,
 }
 
+/// Where one server's custom emoji sit, in the order [`EmojiSet`] has them,
+/// without any of them made: the picker lays thousands of tiles out from
+/// this, and makes the few in sight with `Application::emoji_maker`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmojiShelf {
+    pub server: String,
+    /// The address of the server's icon; see [`ChatServer::icon`].
+    pub icon: Option<String>,
+    /// The server's place among the account's, which `Application::emoji_maker`
+    /// takes.
+    pub place: usize,
+    /// Each available emoji's place in the server, and whether the account
+    /// favourited it.
+    pub emoji: Vec<(u32, bool)>,
+}
+
 /// `text` with each `:name:` of a usable custom emoji, outside code, in Discord's
 /// form, `<:name:id>`. The first emoji of a name wins.
 pub fn wire_emoji(text: &str, usable: &[CustomEmoji]) -> String {

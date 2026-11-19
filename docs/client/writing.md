@@ -109,8 +109,13 @@ with its search (a press nothing in it takes comes to the frame as
 `picker::kit`; each holds
 its layout while it shows and lets go of it, and of the pictures it made,
 when another shows or the picker closes, and the GIFs' and stickers'
-pictures are asked of the core only for the tiles in sight. The custom
-emoji's pictures are the core's: as the emoji grid scrolls into other
+pictures are asked of the core only for the tiles in sight. The emoji
+grid holds a small tile for each emoji, thousands on a large account, that
+says where a server's emoji sits (`Application::emoji_shelves`); the emoji
+itself is made (`Application::emoji_maker`) only as its tile comes into
+sight or is picked, starred or pointed at, so opening the tab lays tiles
+out and copies no server's emoji, which was most of the opening. The
+custom emoji's pictures are the core's: as the emoji grid scrolls into other
 rows (`emoji_reach`), those within three screens are asked for with
 `Action::LoadPicturesFirst`, those in sight first, and the rest let go of
 with `Action::KeepEmojiPictures`, which the root sends with every

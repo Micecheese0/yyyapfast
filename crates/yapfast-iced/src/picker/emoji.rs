@@ -7,6 +7,10 @@
 //! emoji has a star that keeps it among the favourites, as Discord's
 //! settings keep them.
 //!
+//! A server's emoji are tiles that say where the emoji sits, made when the
+//! tile comes into sight (`Item::Slot`), so a large account's thousands are
+//! laid out at each opening and not copied.
+//!
 //! Only the tiles near the viewport are built, and only their pictures
 //! made, each once, at the size it shows (36 px) from the Twemoji font's
 //! PNGs; the tab holds them alone, and lets go of them with itself. The
@@ -30,7 +34,7 @@ use iced::{
 use yapfast_core::{
     application::Action,
     application::Application,
-    chat::{CustomEmoji, EmojiSet},
+    chat::{CustomEmoji, EmojiShelf},
     emoji as names,
 };
 
@@ -130,11 +134,12 @@ pub fn drawn(key: &str) -> bool {
         .contains(key)
 }
 
-/// An emoji the grid shows.
+/// An emoji the grid shows. A custom one is boxed so a tile stays small:
+/// the grid holds a tile for every emoji of every server.
 #[derive(Clone, Debug)]
 pub enum Face {
     Unicode(&'static str),
-    Custom(CustomEmoji),
+    Custom(Box<CustomEmoji>),
 }
 
 impl Face {
@@ -161,6 +166,15 @@ pub enum Item {
     Cell {
         face: Face,
         usable: bool,
+        favorite: bool,
+    },
+    /// A server's emoji, by where it sits (see `Application::emoji_shelves`),
+    /// made when it comes into sight and let go of after: making the
+    /// thousands of a large account's at each opening took most of the
+    /// opening.
+    Slot {
+        place: u32,
+        emoji: u32,
         favorite: bool,
     },
 }
@@ -230,7 +244,12 @@ struct Lists {
     query: String,
     favorites: Vec<(String, bool)>,
     frequent: Vec<(String, bool)>,
-    sets: Vec<EmojiSet>,
+    /// The emoji the account's lists name, made.
+    named: Vec<CustomEmoji>,
+    /// Where each server's emoji sit; none for a search.
+    shelves: Vec<EmojiShelf>,
+    /// The custom emoji a search finds, made.
+    found: Vec<CustomEmoji>,
 }
 
 impl Picker {
@@ -262,35 +281,57 @@ impl Picker {
     /// The account's favourites and most used, and the servers' emoji, for
     /// the picker's target.
     fn emoji_lists(&self, app: &Application, query: String) -> Lists {
-        let sets = app.emoji_sets();
-        let (favorites, frequent) = if query.is_empty() {
-            let by_id: HashMap<&str, &CustomEmoji> = sets
-                .iter()
-                .flat_map(|set| &set.emoji)
-                .map(|emoji| (emoji.id.as_str(), emoji))
-                .collect();
-            let lists = &app.state.discord_emojis;
-            let used = match self.target {
-                Target::React(..) => &lists.reactions,
-                Target::Composer | Target::Edit | Target::Status(_) | Target::Poll(..) => {
-                    &lists.frequent
-                }
+        if !query.is_empty() {
+            return Lists {
+                found: app.emoji_matching(&query),
+                query,
+                favorites: Vec::new(),
+                frequent: Vec::new(),
+                named: Vec::new(),
+                shelves: Vec::new(),
             };
-            let mut frequent = names::discord_keys(used, &by_id);
-            for key in app.frequent_reactions(16) {
-                if !frequent.iter().any(|(known, _)| *known == key) {
-                    frequent.push((key, true));
-                }
+        }
+        let lists = &app.state.discord_emojis;
+        let used = match self.target {
+            Target::React(..) => &lists.reactions,
+            Target::Composer | Target::Edit | Target::Status(_) | Target::Poll(..) => {
+                &lists.frequent
             }
-            (names::discord_keys(&lists.favorites, &by_id), frequent)
-        } else {
-            Default::default()
         };
+        let reactions = app.frequent_reactions(16);
+        // A custom emoji is named by its id in the account's lists: those
+        // are the emoji to make, of the thousands the servers have.
+        let starred: HashSet<&str> = lists.favorites.iter().map(String::as_str).collect();
+        let wanted: HashSet<&str> = starred
+            .iter()
+            .copied()
+            .chain(used.iter().map(String::as_str))
+            .chain(
+                reactions
+                    .iter()
+                    .filter_map(|key| key.rsplit_once(':').map(|(_, id)| id)),
+            )
+            .collect();
+        let (shelves, named) = app.emoji_shelves(&starred, &wanted);
+        let by_id: HashMap<&str, &CustomEmoji> = named
+            .iter()
+            .map(|emoji| (emoji.id.as_str(), emoji))
+            .collect();
+        let mut frequent = names::discord_keys(used, &by_id);
+        for key in &reactions {
+            if !frequent.iter().any(|(known, _)| known == key) {
+                frequent.push((key.clone(), true));
+            }
+        }
+        let favorites = names::discord_keys(&lists.favorites, &by_id);
+        drop(by_id);
         Lists {
             query,
             favorites,
             frequent,
-            sets,
+            named,
+            shelves,
+            found: Vec::new(),
         }
     }
 
@@ -313,25 +354,43 @@ impl Picker {
             query,
             favorites,
             frequent,
-            sets,
+            named,
+            shelves,
+            found,
         } = lists;
         let starred: HashSet<&str> = favorites.iter().map(|(key, _)| key.as_str()).collect();
-        let custom: HashMap<&str, &CustomEmoji> = sets
+        let custom: HashMap<&str, &CustomEmoji> = named
             .iter()
-            .flat_map(|set| &set.emoji)
             .map(|emoji| (emoji.id.as_str(), emoji))
             .collect();
         // A key of the account's lists as the grid shows it.
         let face = |key: &str| match key.rsplit_once(':') {
-            Some((_, id)) => custom.get(id).map(|emoji| Face::Custom((*emoji).clone())),
+            Some((_, id)) => custom
+                .get(id)
+                .map(|emoji| Face::Custom(Box::new((*emoji).clone()))),
             None => emojis::get(key).map(|emoji| Face::Unicode(emoji.as_str())),
         };
+        // A cell of the grid, starred when the account keeps it among its
+        // favourites.
+        let cell = |face: Face, usable: bool| {
+            let favorite = !starred.is_empty()
+                && match &face {
+                    Face::Unicode(key) => starred.contains(key),
+                    Face::Custom(_) => starred.contains(face.key().as_str()),
+                };
+            Item::Cell {
+                face,
+                usable,
+                favorite,
+            }
+        };
+        let make = cx.client.app.emoji_maker();
         let mut grid = Grid::default();
         let mut headings = HashMap::new();
         let mut top = 0.0;
         let mut section = |grid: &mut Grid<Item, Mark>,
                            heading: Option<(String, Mark)>,
-                           cells: Vec<(Face, bool)>| {
+                           cells: Vec<Item>| {
             if cells.is_empty() {
                 return;
             }
@@ -351,24 +410,14 @@ impl Picker {
                 );
                 top += HEADING;
             }
-            for (index, (face, usable)) in cells.into_iter().enumerate() {
+            for (index, item) in cells.into_iter().enumerate() {
                 let (column, line) = (index % columns, index / columns);
-                // A Unicode emoji is its own key; only a custom one's is made.
-                let favorite = !starred.is_empty()
-                    && match &face {
-                        Face::Unicode(key) => starred.contains(key),
-                        Face::Custom(_) => starred.contains(face.key().as_str()),
-                    };
                 grid.place(
                     Rectangle::new(
                         iced::Point::new(INSET + column as f32 * CELL, top + line as f32 * CELL),
                         Size::new(CELL, CELL),
                     ),
-                    Item::Cell {
-                        face,
-                        usable,
-                        favorite,
-                    },
+                    item,
                 );
             }
             top = grid.height;
@@ -380,11 +429,12 @@ impl Picker {
         };
         let catalog = shared_catalog();
         if !query.is_empty() {
-            let mut cells: Vec<(Face, bool)> = sets
-                .iter()
-                .flat_map(|set| &set.emoji)
-                .filter(|emoji| emoji.text.to_lowercase().contains(&query))
-                .map(|emoji| (Face::Custom(emoji.clone()), emoji.usable))
+            let mut cells: Vec<Item> = found
+                .into_iter()
+                .map(|emoji| {
+                    let usable = emoji.usable;
+                    cell(Face::Custom(Box::new(emoji)), usable)
+                })
                 .collect();
             cells.extend(
                 catalog
@@ -393,13 +443,13 @@ impl Picker {
                     .filter(|key| {
                         emojis::get(key).is_some_and(|emoji| names::matches(emoji, &query))
                     })
-                    .map(|key| (Face::Unicode(key), true)),
+                    .map(|key| cell(Face::Unicode(key), true)),
             );
             section(&mut grid, None, cells);
         } else {
-            let listed = |list: &[(String, bool)]| -> Vec<(Face, bool)> {
+            let listed = |list: &[(String, bool)]| -> Vec<Item> {
                 list.iter()
-                    .filter_map(|(key, usable)| Some((face(key)?, *usable)))
+                    .filter_map(|(key, usable)| Some(cell(face(key)?, *usable)))
                     .collect()
             };
             section(
@@ -412,24 +462,33 @@ impl Picker {
                 Some(("Frequently Used".into(), Mark::Clock)),
                 listed(&frequent),
             );
-            // Each server's emoji go into the grid as they are, with no
-            // second copy made.
-            for set in sets {
-                let Some(first) = set.emoji.first() else {
-                    continue;
-                };
-                let mark = match &set.icon {
+            // Each server's emoji go into the grid by where they sit: made
+            // for the tiles in sight alone, not all at each opening.
+            for shelf in shelves {
+                let mark = match &shelf.icon {
                     Some(url) => Mark::Icon(url.clone()),
-                    None => Mark::Face(Face::Custom(first.clone())),
+                    None => {
+                        let Some(first) = shelf
+                            .emoji
+                            .first()
+                            .and_then(|(first, _)| make(shelf.place, *first as usize))
+                        else {
+                            continue;
+                        };
+                        Mark::Face(Face::Custom(Box::new(first)))
+                    }
                 };
+                let place = shelf.place as u32;
                 section(
                     &mut grid,
-                    Some((set.server, mark)),
-                    set.emoji
-                        .into_iter()
-                        .map(|emoji| {
-                            let usable = emoji.usable;
-                            (Face::Custom(emoji), usable)
+                    Some((shelf.server, mark)),
+                    shelf
+                        .emoji
+                        .iter()
+                        .map(|&(emoji, favorite)| Item::Slot {
+                            place,
+                            emoji,
+                            favorite,
                         })
                         .collect(),
                 );
@@ -444,7 +503,7 @@ impl Picker {
                     category
                         .emoji
                         .iter()
-                        .map(|key| (Face::Unicode(key), true))
+                        .map(|key| cell(Face::Unicode(key), true))
                         .collect(),
                 );
             }
@@ -487,19 +546,24 @@ impl Picker {
             return;
         }
         tab.reached = Some((built, from, to));
-        let mut near: Vec<(f32, &str)> = tiles[from..to.max(from)]
+        let make = cx.client.app.emoji_maker();
+        let mut near: Vec<(f32, String)> = tiles[from..to.max(from)]
             .iter()
-            .filter_map(|tile| match &tile.item {
-                Item::Cell {
-                    face: Face::Custom(emoji),
-                    ..
-                } => {
-                    let away = (top - tile.at.y - tile.at.height)
-                        .max(tile.at.y - bottom)
-                        .max(0.0);
-                    Some((away, emoji.picture.as_str()))
-                }
-                _ => None,
+            .filter_map(|tile| {
+                let picture = match &tile.item {
+                    Item::Cell {
+                        face: Face::Custom(emoji),
+                        ..
+                    } => emoji.picture.clone(),
+                    Item::Slot { place, emoji, .. } => {
+                        make(*place as usize, *emoji as usize)?.picture
+                    }
+                    _ => return None,
+                };
+                let away = (top - tile.at.y - tile.at.height)
+                    .max(tile.at.y - bottom)
+                    .max(0.0);
+                Some((away, picture))
             })
             .collect();
         // Stable, so those in sight keep the grid's order.
@@ -507,10 +571,10 @@ impl Picker {
         let pictures = &cx.state().pictures;
         let missing: Vec<String> = near
             .iter()
-            .filter(|(_, url)| !url.is_empty() && !pictures.contains_key(*url))
-            .map(|(_, url)| (*url).to_owned())
+            .filter(|(_, url)| !url.is_empty() && !pictures.contains_key(url.as_str()))
+            .map(|(_, url)| url.clone())
             .collect();
-        let mut keep: Vec<String> = near.into_iter().map(|(_, url)| url.to_owned()).collect();
+        let mut keep: Vec<String> = near.into_iter().map(|(_, url)| url).collect();
         keep.extend(tab.pictures());
         cx.request(Request::KeepEmoji {
             near: keep,
@@ -518,16 +582,23 @@ impl Picker {
         });
     }
 
-    fn emoji_cell(&self, index: usize) -> Option<(&Face, bool)> {
+    /// The emoji a tile shows, and whether it may be used, made if the tile
+    /// only says where it sits.
+    fn emoji_cell(&self, index: usize, app: &Application) -> Option<(Face, bool)> {
         let tab = self.emoji.as_ref()?;
         match &tab.grid.tiles.get(index)?.item {
-            Item::Cell { face, usable, .. } => Some((face, *usable)),
+            Item::Cell { face, usable, .. } => Some((face.clone(), *usable)),
+            Item::Slot { place, emoji, .. } => {
+                let emoji = app.emoji_maker()(*place as usize, *emoji as usize)?;
+                let usable = emoji.usable;
+                Some((Face::Custom(Box::new(emoji)), usable))
+            }
             Item::Heading(_) => None,
         }
     }
 
     pub(super) fn emoji_pick(&mut self, index: usize, cx: &mut Cx<'_>) -> Task<Message> {
-        match self.emoji_cell(index) {
+        match self.emoji_cell(index, &cx.client.app) {
             Some((face, true)) => {
                 let key = face.key();
                 self.place_emoji(key, cx)
@@ -558,7 +629,7 @@ impl Picker {
     /// lets it go.
     pub(super) fn emoji_star(&mut self, index: usize, cx: &mut Cx<'_>) {
         let Some(name) = self
-            .emoji_cell(index)
+            .emoji_cell(index, &cx.client.app)
             .and_then(|(face, _)| names::discord_name(&face.key()))
         else {
             return;
@@ -638,6 +709,57 @@ impl<'a> View<'a> {
             theme,
         );
         let wash = theme.wash(0.12);
+        // What this account may use is worked out once for the view, and
+        // the emoji of the tiles in sight are made from it.
+        let make = self.cx.app.emoji_maker();
+        let shown_cell = |index: usize, face: &Face, usable: bool, favorite: bool| {
+            let fade = if usable { 1.0 } else { 0.4 };
+            // An animated custom emoji plays in its cell, greyed
+            // or not; the rail and the foot show its still.
+            let playing = match face {
+                Face::Custom(emoji) => self.cx.playing_emoji(&emoji.picture, GLYPH, &tab.players),
+                Face::Unicode(_) => None,
+            };
+            let shown = match playing {
+                Some(playing) => container(playing.opacity(fade)).center(CELL).into(),
+                None => self.face_view(tab, face, CELL, GLYPH, fade),
+            };
+            let mut face_shown = stack![shown];
+            if !usable {
+                face_shown = face_shown.push(kit::pinned(
+                    self.cx.look.glyph(Icon::Lock, 14, theme.text),
+                    Alignment::End,
+                    Alignment::End,
+                    4.0,
+                ));
+            }
+            let cell = button(face_shown)
+                .padding(0)
+                .width(CELL)
+                .height(CELL)
+                .on_press_maybe(usable.then_some(Message::Picker(Event::Pick(index))))
+                .style(lit_style(None, wash, 6.0));
+            let mut layers = stack![cell];
+            if favorite || picker.hover == Some(index) {
+                layers = layers.push(kit::pinned(
+                    kit::star(
+                        self.cx.look,
+                        favorite,
+                        18.0,
+                        12,
+                        Message::Picker(Event::Star(index)),
+                    ),
+                    Alignment::End,
+                    Alignment::Start,
+                    0.0,
+                ));
+            }
+            let tile: Element<'a, Message> = mouse_area(layers)
+                .on_enter(Message::Picker(Event::Hover(index)))
+                .on_exit(Message::Picker(Event::Left(index)))
+                .into();
+            tile
+        };
         let rows = tab
             .grid
             .rows(picker.scroll, picker.built, |index, item, _| match item {
@@ -653,55 +775,18 @@ impl<'a> View<'a> {
                     face,
                     usable,
                     favorite,
-                } => {
-                    let fade = if *usable { 1.0 } else { 0.4 };
-                    // An animated custom emoji plays in its cell, greyed
-                    // or not; the rail and the foot show its still.
-                    let playing = match face {
-                        Face::Custom(emoji) => {
-                            self.cx.playing_emoji(&emoji.picture, GLYPH, &tab.players)
-                        }
-                        Face::Unicode(_) => None,
-                    };
-                    let shown = match playing {
-                        Some(playing) => container(playing.opacity(fade)).center(CELL).into(),
-                        None => self.face_view(tab, face, CELL, GLYPH, fade),
-                    };
-                    let mut face_shown = stack![shown];
-                    if !usable {
-                        face_shown = face_shown.push(kit::pinned(
-                            self.cx.look.glyph(Icon::Lock, 14, theme.text),
-                            Alignment::End,
-                            Alignment::End,
-                            4.0,
-                        ));
+                } => shown_cell(index, face, *usable, *favorite),
+                Item::Slot {
+                    place,
+                    emoji,
+                    favorite,
+                } => match make(*place as usize, *emoji as usize) {
+                    Some(emoji) => {
+                        let usable = emoji.usable;
+                        shown_cell(index, &Face::Custom(Box::new(emoji)), usable, *favorite)
                     }
-                    let cell = button(face_shown)
-                        .padding(0)
-                        .width(CELL)
-                        .height(CELL)
-                        .on_press_maybe(usable.then_some(Message::Picker(Event::Pick(index))))
-                        .style(lit_style(None, wash, 6.0));
-                    let mut layers = stack![cell];
-                    if *favorite || picker.hover == Some(index) {
-                        layers = layers.push(kit::pinned(
-                            kit::star(
-                                self.cx.look,
-                                *favorite,
-                                18.0,
-                                12,
-                                Message::Picker(Event::Star(index)),
-                            ),
-                            Alignment::End,
-                            Alignment::Start,
-                            0.0,
-                        ));
-                    }
-                    mouse_area(layers)
-                        .on_enter(Message::Picker(Event::Hover(index)))
-                        .on_exit(Message::Picker(Event::Left(index)))
-                        .into()
-                }
+                    None => Space::new().width(CELL).height(CELL).into(),
+                },
             });
         let grid: Element<'a, Message> = if tab.grid.tiles.is_empty() {
             kit::note(
@@ -712,19 +797,22 @@ impl<'a> View<'a> {
             kit::grid(rows, theme)
         };
         // The pointed emoji, larger, with its name.
-        let pointed = picker
-            .hover
-            .and_then(|index| match &tab.grid.tiles.get(index)?.item {
-                Item::Cell { face, .. } => Some(face),
-                Item::Heading(_) => None,
-            });
+        let pointed: Option<Face> =
+            picker
+                .hover
+                .and_then(|index| match &tab.grid.tiles.get(index)?.item {
+                    Item::Cell { face, .. } => Some(face.clone()),
+                    Item::Slot { place, emoji, .. } => make(*place as usize, *emoji as usize)
+                        .map(|emoji| Face::Custom(Box::new(emoji))),
+                    Item::Heading(_) => None,
+                });
         // Else the rail's section under the pointer, by its mark and name.
         let section = picker
             .rail_hover
             .and_then(|index| tab.grid.sections.get(index));
         let foot: Element<'a, Message> = match (pointed, section) {
             (Some(face), _) => row![
-                self.face_view(tab, face, 30.0, 26, 1.0),
+                self.face_view(tab, &face, 30.0, 26, 1.0),
                 kit::foot_words(names::title(&face.key()), true, theme)
             ]
             .spacing(10)
