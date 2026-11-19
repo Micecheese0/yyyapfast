@@ -566,6 +566,8 @@ impl Picker {
                 Some((away, picture))
             })
             .collect();
+        // Done with the app, which the request below changes.
+        drop(make);
         // Stable, so those in sight keep the grid's order.
         near.sort_by(|a, b| a.0.total_cmp(&b.0));
         let pictures = &cx.state().pictures;
