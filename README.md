@@ -11,6 +11,14 @@
   <a href="https://yapfast.com/discord-invite"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Join the Yapfast Discord server"></a>
 </p>
 
+> **This is a personal-use build.** The `Mice-custom` branch of this fork
+> carries my own changes (Nitro bypasses, a message logger and more) and
+> likely won't accept pull requests or merge requests. To contribute code,
+> use the [`Yapfast-Iced`](https://github.com/Micecheese0/yyyapfast/tree/Yapfast-Iced)
+> branch, which stays in step with upstream Yapfast. To ask for a plugin
+> fork, ask in the [Yapfast Discord server](https://yapfast.com/discord-invite)
+> instead.
+
 <p align="center">
   <b>A Discord client without the web browser.</b><br>
   About 30 MB of RAM idle, where Discord's app takes 720 MB (<a href="#measured-against-discord">measured as Vesktop</a>).
