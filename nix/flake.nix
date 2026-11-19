@@ -15,6 +15,13 @@
       # takes both. A machine that downloaded the SDK before keeps its copy.
       cargoXwin = pkgs.cargo-xwin.overrideAttrs (old: rec {
         version = "0.23.1";
+        # Its tests set and clear RUSTFLAGS, which every thread shares, so
+        # one fails when it reads what another has set or cleared: which
+        # one varies from build to build. One thread runs them in turn.
+        # nixpkgs' check hook passes --test-threads itself, as many as the
+        # build has cores, which RUST_TEST_THREADS can't override; this
+        # makes it pass 1.
+        dontUseCargoParallelTests = true;
         src = pkgs.fetchFromGitHub {
           owner = "rust-cross";
           repo = "cargo-xwin";
