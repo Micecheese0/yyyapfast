@@ -126,7 +126,7 @@ pub fn watch_keybinds(app: &mut App) -> Task<Message> {
     app.keybinds.watcher = None;
     app.keybinds.status = None;
     app.keybinds.count += 1;
-    app.keybinds.watched = wanted.clone();
+    app.keybinds.watched.clone_from(&wanted);
     let (sender, told) = tokio::sync::mpsc::unbounded_channel();
     let toggles = sender.clone();
     let toggled: crate::Toggled = std::sync::Arc::new(move |action| {
@@ -209,10 +209,10 @@ pub(crate) fn scancode(physical: key::Physical) -> Option<u32> {
     })
 }
 
-/// The window's own keys for push to talk: each key's scan code going down
-/// or up, and the focus going, to the root crate, which holds the key only
-/// while no global key works. No message: the filter calls the root crate
-/// and returns nothing.
+/// The window's own keys for keybinds: each key's scan code and each side
+/// button going down or up, and the focus going, to the root crate, which
+/// runs keybinds by them only while nothing else hears the key. No message:
+/// the filter calls the root crate and returns nothing.
 pub fn window_talk_keys() -> iced::Subscription<Message> {
     iced::event::listen_with(|event, _, _| {
         let desktop = crate::desktop::desktop();
@@ -231,6 +231,20 @@ pub fn window_talk_keys() -> iced::Subscription<Message> {
                 if let Some(code) = known_scancode(physical_key) {
                     talk(Some(code), false);
                 }
+            }
+            // Mouse 4 and 5, which keybinds hold on Windows.
+            #[cfg(windows)]
+            iced::Event::Mouse(
+                event @ (iced::mouse::Event::ButtonPressed(button)
+                | iced::mouse::Event::ButtonReleased(button)),
+            ) => {
+                let code = match button {
+                    iced::mouse::Button::Back => yapfast_core::keybinds::MOUSE_4,
+                    iced::mouse::Button::Forward => yapfast_core::keybinds::MOUSE_5,
+                    _ => return None,
+                };
+                let pressed = matches!(event, iced::mouse::Event::ButtonPressed(_));
+                talk(Some(code), pressed);
             }
             iced::Event::Window(iced::window::Event::Unfocused) => talk(None, false),
             _ => {}

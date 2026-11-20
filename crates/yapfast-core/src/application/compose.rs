@@ -23,7 +23,7 @@ impl Application {
     }
 
     pub(super) fn mention_query(&mut self, query: Option<(char, String)>) -> Vec<Effect> {
-        self.state.mention_query = query.clone();
+        self.state.mention_query.clone_from(&query);
         // Discord servers list only some members; ask for the rest by name.
         let (Some(room), Some(('@', query))) = (self.state.selected.clone(), query) else {
             return vec![];
@@ -101,10 +101,12 @@ impl Application {
         if !message.can_reply || !self.state.can_write_in(&id) {
             return vec![];
         }
+        let (body, emoji) = chat::reply_snippet(&message.body, message.emoji.clone());
         let reply = Compose::Reply {
             item,
             author: message.author.clone(),
-            body: chat::plain_snippet(&message.body),
+            body,
+            emoji,
             ping: self.state.reply_ping,
         };
         self.state.compose.insert(id, reply);
@@ -180,7 +182,7 @@ impl Application {
         }
         if self.state.preview {
             self.update_sample(&edit.room, &edit.item, |message| {
-                message.body = body.clone();
+                message.body.clone_from(&body);
                 message.formatted = has_markdown(&body);
                 message.edited = true;
             });
@@ -349,7 +351,11 @@ impl Application {
                 own: true,
                 reply: match compose {
                     Some(Compose::Reply {
-                        item, author, body, ..
+                        item,
+                        author,
+                        body,
+                        emoji,
+                        ..
                     }) => Some(Reply {
                         author,
                         avatar: self
@@ -360,7 +366,12 @@ impl Application {
                             .state
                             .message(&item)
                             .and_then(|original| original.color),
+                        tag: self
+                            .state
+                            .message(&item)
+                            .and_then(|original| original.tag.clone()),
                         body,
+                        emoji,
                         item: Some(item),
                     }),
                     _ => None,

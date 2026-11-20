@@ -94,6 +94,14 @@ pub enum Icon {
     ChevronRight,
     UserPlus,
     Calendar,
+    /// A solid calendar, the Events row's.
+    CalendarFilled,
+    /// A speech bubble with a check at its corner: the unread banner's mark
+    /// as read.
+    MarkRead,
+    /// The point of the "NEW" tag's left end, in the top left 7 px of its
+    /// 13 px square.
+    NoticeNotch,
     SquarePen,
     Inbox,
     Hash,
@@ -124,6 +132,20 @@ pub enum Icon {
     Settings,
     Community,
     Verified,
+    /// A scalloped badge, which holds a server's boost level.
+    Scallop,
+    /// The note's filled info disc, the friends' kebab and the new group
+    /// DM, which Discord draws in these shapes.
+    CircleInfoFilled,
+    EllipsisVertical,
+    MessageCirclePlus,
+    UserCheck,
+    /// The title bar's minimize, maximize, restore and close, drawn in 1 px
+    /// strokes in a 10 px square, as Discord's Windows frame draws them.
+    CaptionMin,
+    CaptionMax,
+    CaptionRestore,
+    CaptionClose,
     Id,
     History,
     Forward,
@@ -132,6 +154,8 @@ pub enum Icon {
     Ellipsis,
     ChartBar,
     Search,
+    /// Up and down arrows: a Sort menu.
+    ArrowsUpDown,
     ForumPost,
     /// The curve from a reply's line down to its avatar, in the top 13
     /// of its 33 px square.
@@ -250,6 +274,7 @@ impl Icon {
             Icon::Ellipsis => icon!("ellipsis.svg"),
             Icon::ChartBar => icon!("chart-bar.svg"),
             Icon::Search => icon!("search.svg"),
+            Icon::ArrowsUpDown => icon!("arrows-up-down.svg"),
             Icon::ForumPost => icon!("message-square-text.svg"),
             Icon::SmilePlus => icon!("smile-plus.svg"),
             Icon::Smile => icon!("smile.svg"),
@@ -292,6 +317,9 @@ impl Icon {
             }
             Icon::UserPlus => icon!("user-plus.svg"),
             Icon::Calendar => icon!("calendar.svg"),
+            Icon::CalendarFilled => icon!("calendar-filled.svg"),
+            Icon::MarkRead => icon!("mark-read.svg"),
+            Icon::NoticeNotch => icon!("notice-notch.svg"),
             Icon::SquarePen => icon!("square-pen.svg"),
             Icon::Inbox => icon!("inbox.svg"),
             Icon::Hash => icon!("hash.svg"),
@@ -322,6 +350,15 @@ impl Icon {
             Icon::Settings => icon!("settings.svg"),
             Icon::Community => icon!("community.svg"),
             Icon::Verified => icon!("verified.svg"),
+            Icon::Scallop => icon!("scallop.svg"),
+            Icon::CircleInfoFilled => icon!("circle-info-filled.svg"),
+            Icon::EllipsisVertical => icon!("ellipsis-vertical.svg"),
+            Icon::MessageCirclePlus => icon!("message-circle-plus.svg"),
+            Icon::UserCheck => icon!("user-check.svg"),
+            Icon::CaptionMin => icon!("caption-min.svg"),
+            Icon::CaptionMax => icon!("caption-max.svg"),
+            Icon::CaptionRestore => icon!("caption-restore.svg"),
+            Icon::CaptionClose => icon!("caption-close.svg"),
             Icon::Id => icon!("id-filled.svg"),
             Icon::PhoneOff => icon!("phone-off.svg"),
             Icon::ScreenShare => icon!("screen-share.svg"),

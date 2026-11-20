@@ -55,6 +55,7 @@
 mod sealed;
 
 use std::{
+    fmt::Write as _,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
@@ -630,10 +631,11 @@ pub fn videos() -> Option<PathBuf> {
 }
 
 fn hash(text: &str) -> String {
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    let mut hex = String::with_capacity(64);
+    for byte in Sha256::digest(text.as_bytes()) {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
 }
 
 fn current_login() -> Option<String> {
@@ -1616,7 +1618,7 @@ mod tests {
             }),
         };
         write_home(&file, &home);
-        assert_eq!(read_home(&file), Some(home.clone()));
+        assert_eq!(read_home(&file), Some(home));
         // A day makes it stale; a moment ago does not.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

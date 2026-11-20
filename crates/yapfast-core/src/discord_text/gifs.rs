@@ -107,7 +107,7 @@ pub(super) fn command(
                         };
                         if !tenor {
                             let _ = tokio::task::spawn_blocking(move || {
-                                yapfast_discord::cache::keep_gif_home_answer(&home)
+                                yapfast_discord::cache::keep_gif_home_answer(&home);
                             })
                             .await;
                         }

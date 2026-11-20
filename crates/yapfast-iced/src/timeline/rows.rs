@@ -17,8 +17,8 @@ use crate::{
 
 use super::{
     AUTHOR_GAP, AUTHOR_LINE, AVATAR, CHAR, CONTENT_PAD, Clock, DIVIDED_GAP, DIVIDER, EDGE, EMBED,
-    EMBED_ROOM, END_PAD, FILE_CARD, GROUP_GAP, GUTTER, INTRO_CHANNEL, INTRO_SERVER, LINE_HEIGHT,
-    ROW_GAP, TAIL, THREAD_CHIP,
+    EMBED_ROOM, END_PAD, FILE_CARD, GROUP_GAP, GUTTER, INTRO_CHANNEL, INTRO_DIRECT, INTRO_SERVER,
+    LINE_HEIGHT, ROW_GAP, TAIL, THREAD_CHIP,
 };
 
 /// Whether `message` continues the group of the one `before` it, as
@@ -57,8 +57,9 @@ pub struct RowLook {
     pub body: Arc<Laid>,
     /// Its message's local date, worked out once.
     pub date: Option<chrono::NaiveDate>,
-    /// When it was sent, on the clock Messages' settings chose.
-    pub time: String,
+    /// When it was sent, on the clock Messages' settings chose, shared
+    /// with the look it was worked out for.
+    pub time: Arc<str>,
 }
 
 /// A message's text laid out: its body, which it derefs to, and its
@@ -69,6 +70,8 @@ pub struct Laid {
     pub embeds: Vec<EmbedText>,
     /// Each of its apps' cards' text rows.
     pub cards: Vec<Vec<Body>>,
+    /// The reply quote's single-line snippet, whitespace collapsed.
+    pub reply: String,
 }
 
 impl std::ops::Deref for Laid {
@@ -139,7 +142,7 @@ pub fn row_looks<'a>(
                     Arc::from(message.item.as_str()),
                     body(index),
                     yapfast_core::clock::date(message.timestamp),
-                    clock.sent(message, now),
+                    clock.sent(message, now).into(),
                 ),
             };
             let new_day = date.is_some() && (before.is_none() || before_date != date);
@@ -175,6 +178,8 @@ pub fn same_text(a: &ChatMessage, b: &ChatMessage) -> bool {
         && a.body == b.body
         && a.mentions == b.mentions
         && a.emoji == b.emoji
+        && a.reply.as_ref().map(|reply| reply.body.as_str())
+            == b.reply.as_ref().map(|reply| reply.body.as_str())
         && a.cards == b.cards
         && a.embeds.len() == b.embeds.len()
         && a.embeds
@@ -233,10 +238,16 @@ pub fn body_of(
             })
         })
         .collect();
+    let reply = message
+        .reply
+        .as_ref()
+        .map(|reply| reply.body.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default();
     Laid {
         body,
         embeds,
         cards,
+        reply,
     }
 }
 
@@ -266,6 +277,8 @@ pub enum Intro {
     /// The server's first text channel: welcome to the server.
     Server(String),
     Channel,
+    /// A one-to-one DM's: the other person, with what is shared.
+    Direct,
 }
 
 impl Edge {
@@ -293,6 +306,15 @@ impl Edge {
                     Some(server) if first => Intro::Server(server.name.clone()),
                     _ => Intro::Channel,
                 }
+            }
+            // A one-to-one DM opens with the other person.
+            (Some(room), _)
+                if room.network == Network::Discord
+                    && room.direct
+                    && room.person.is_some()
+                    && room.capabilities.dm_calls =>
+            {
+                Intro::Direct
             }
             _ => Intro::None,
         };
@@ -331,6 +353,7 @@ impl Edge {
             _ if !self.ready => 0.0,
             Intro::Server(_) if self.start => INTRO_SERVER,
             Intro::Channel if self.start => INTRO_CHANNEL,
+            Intro::Direct if self.start => INTRO_DIRECT,
             _ => EDGE,
         }
     }
@@ -395,7 +418,8 @@ pub fn row_height(message: &ChatMessage, look: &RowLook, width: f32, edge: f32) 
             };
     }
     if !message.reactions.is_empty() {
-        content += 30.0;
+        // The chips, and the 4 above them.
+        content += 34.0;
     }
     if message.thread.is_some() {
         content += THREAD_CHIP;

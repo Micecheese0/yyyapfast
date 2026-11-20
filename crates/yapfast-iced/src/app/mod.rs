@@ -92,6 +92,9 @@ pub struct App {
     /// A server is open, and the open room is in one.
     pub server: bool,
     pub in_server: bool,
+    /// Who wrote the forum post that is open ([`looks::post_author`]),
+    /// whom the timeline tags OP.
+    pub post_author: Option<String>,
     /// The account's card, and whether the pointer is on its names.
     pub account: crate::account::Account,
     pub account_pointed: bool,
@@ -263,6 +266,7 @@ impl App {
             lists_shown: None,
             server: false,
             in_server: false,
+            post_author: None,
             account: Default::default(),
             account_pointed: false,
             composer: Default::default(),
@@ -480,6 +484,25 @@ impl App {
             }
             Message::Forum(event) => crate::forum::update(self, event),
             Message::BrowseChannels(event) => crate::browse_channels::update(self, event),
+            Message::Search(crate::search::Event::Focus { channel }) => {
+                crate::search::focus(self, channel)
+            }
+            Message::Search(crate::search::Event::SortMenu) => {
+                let at = self.pressed.get();
+                crate::search::open_sort_menu(self, at)
+            }
+            Message::Search(crate::search::Event::Filters(event)) => {
+                crate::search_filters::update(self, event)
+            }
+            Message::Search(crate::search::Event::Popout(event)) => {
+                crate::search_popout::event(self, event)
+            }
+            Message::Search(crate::search::Event::Field(crate::field::Event::Step(by))) => {
+                crate::search_popout::step(self, by)
+            }
+            Message::Search(crate::search::Event::Field(crate::field::Event::Choose)) => {
+                crate::search_popout::choose(self)
+            }
             Message::Search(event) => {
                 let mut cx = crate::ctx::cx!(self);
                 self.searching.update(event, &mut cx)

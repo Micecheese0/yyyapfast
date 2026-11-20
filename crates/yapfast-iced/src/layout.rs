@@ -88,6 +88,9 @@ pub struct Layout {
     pub sticker_favorites: Vec<KeptSticker>,
     /// The Keybinds page's keybinds, in its order.
     pub keybinds: Vec<Binding>,
+    /// Each place's searches, newest first, by server or DM id, as
+    /// Discord's box keeps them (`search_popout::HISTORY`).
+    pub search_history: HashMap<String, Vec<String>>,
     /// What calls send and play; see [`Voice`].
     #[serde(flatten)]
     pub voice: Voice,
@@ -744,7 +747,7 @@ pub(crate) mod tests {
 
     /// Held by a test that sets the volumes and reads them back: until it
     /// drops, no other window plays its own.
-    pub struct Held(#[allow(dead_code)] MutexGuard<'static, ()>);
+    pub struct Held(#[allow(dead_code, reason = "held for its drop")] MutexGuard<'static, ()>);
 
     impl Drop for Held {
         fn drop(&mut self) {

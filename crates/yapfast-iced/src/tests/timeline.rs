@@ -190,6 +190,10 @@ fn the_unread_bar_jumps_to_the_new_divider_out_of_view() {
         !shows(&app, "Message number 10"),
         "the divider is above the view"
     );
+    assert!(
+        shows(&app, "Mark as read"),
+        "the banner offers to mark the room read"
+    );
     interact(&mut app, |ui| {
         let bar = starting(ui, "70 new messages since ").expect("the bar counts what's new");
         ui.point_at(bar);
@@ -199,7 +203,7 @@ fn the_unread_bar_jumps_to_the_new_divider_out_of_view() {
     // The rows round it are built; the scroll there is a task, which
     // doesn't run here, so the list itself stays where it was.
     assert!(present(&app, "Message number 10"), "the view went to it");
-    assert!(present(&app, "New"));
+    assert!(present(&app, "NEW"));
     assert!(app.timeline.from_end > 0.0);
 }
 
@@ -570,7 +574,7 @@ fn a_right_click_on_a_link_adds_its_address_to_the_messages_menu() {
                 crate::menus::MenuAct::CopyTextLink | crate::menus::MenuAct::OpenTextLink
             )
         });
-        rows.map(|row| (row.label.to_string(), row.key.to_string()))
+        rows.map(|row| (row.label.to_string(), row.key.clone()))
             .collect::<Vec<_>>()
     };
     // Plain text: the message's own rows.
@@ -604,7 +608,7 @@ fn a_right_click_on_a_link_adds_its_address_to_the_messages_menu() {
     // The next menu, asked for off the link, has none.
     let _ = app.update(Message::Menu(crate::menus::Event::Close));
     interact(&mut app, |ui| {
-        right_click(ui, "Nice, let's get a game going.")
+        right_click(ui, "Nice, let's get a game going.");
     });
     assert_eq!(link_rows(&app), []);
 }
@@ -1233,4 +1237,157 @@ fn an_animated_custom_emoji_plays_in_text_and_its_reaction_with_one_player_for_i
         state.messages = Arc::new(messages);
     });
     assert_eq!(playing(&app), (Vec::new(), false));
+}
+
+#[test]
+fn reply_quotes_render_static_and_animated_custom_emoji_and_fall_back_until_loaded() {
+    use iced::Settings;
+    use iced_test::{Simulator, selector::Candidate};
+    use yapfast_core::chat::{ChatMessage, CustomEmoji, Picture, Pixels, Reply};
+
+    let (mut app, _folder) = preview();
+    let party = super::animated_emoji();
+    // Bright magenta static emoji so rendered pixels differ unmistakably from background.
+    let calm_rgba: Vec<u8> = [255u8, 0, 255, 255].repeat(64 * 64);
+    let calm = Arc::new(Picture {
+        width: 64,
+        height: 64,
+        rgba: Pixels::new(64, 64, calm_rgba),
+        ..Default::default()
+    });
+    let emoji = vec![
+        CustomEmoji {
+            text: ":AMkiss:".into(),
+            id: "1".into(),
+            animated: false,
+            usable: true,
+            picture: "https://cdn/emojis/1.png?size=64".into(),
+        },
+        CustomEmoji {
+            text: ":party:".into(),
+            id: "2".into(),
+            animated: true,
+            usable: true,
+            picture: "https://cdn/emojis/2.gif?size=64".into(),
+        },
+    ];
+    let message = ChatMessage {
+        item: "reply-target".into(),
+        author: "Kitty".into(),
+        body: "Looking at that reply".into(),
+        reply: Some(Reply {
+            author: "desu".into(),
+            body: "hi :AMkiss: and :party:!".into(),
+            emoji: emoji.clone(),
+            item: Some("orig".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    change(&mut app, |state| {
+        state.messages = Arc::new(vec![Arc::new(message)]);
+    });
+
+    // Until the emoji pictures arrive, the quote falls back cleanly to `:name:` text.
+    assert!(
+        shows(&app, "hi :AMkiss: and :party:!"),
+        "falls back to :name: text before pictures arrive"
+    );
+
+    // Once pictures arrive, the quote replaces `:name:` with inline emoji pictures
+    // and requests the animated player at the compact reply size.
+    change(&mut app, |state| {
+        state
+            .pictures
+            .insert(emoji[0].picture.clone(), calm.clone());
+        state
+            .pictures
+            .insert(emoji[1].picture.clone(), party.clone());
+    });
+    assert!(
+        !shows(&app, "hi :AMkiss: and :party:!"),
+        "literal :name: replaced once emoji pictures load"
+    );
+    assert!(
+        shows(&app, "hi \u{2003} and \u{2003}!"),
+        "inline emoji placeholders stay on one line with surrounding text"
+    );
+    app.layout.prefs.animate = crate::layout::Animate::Always;
+    super::redraw(&app);
+    let keys = app.win.pictures.players.keys();
+    let party_at = Arc::as_ptr(&party) as usize;
+    let calm_at = Arc::as_ptr(&calm) as usize;
+    let party_sizes: Vec<(u32, u32)> = keys
+        .iter()
+        .filter(|key| key.0 == party_at)
+        .map(|key| (key.1, key.2))
+        .collect();
+    assert_eq!(party_sizes, vec![(16, 16)]);
+    assert!(
+        !keys.iter().any(|key| key.0 == calm_at),
+        "static reply emoji has no player"
+    );
+
+    // Single-line layout stays within HEADER_LINE (22px) even with emojis and long text,
+    // and draws the emoji image in both dark and light themes.
+    for theme_cmd in [None, Some("theme sakura")] {
+        if let Some(cmd) = theme_cmd {
+            let _ = app.update(Message::Control(cmd.into()));
+        }
+        let mut ui = Simulator::with_size(Settings::default(), app.shell.frame, app.view());
+        let reply_bounds = ui
+            .find(|candidate: Candidate<'_>| match candidate {
+                Candidate::Text {
+                    content: "hi \u{2003} and \u{2003}!",
+                    visible_bounds: Some(bounds),
+                    ..
+                } => Some(bounds),
+                _ => None,
+            })
+            .expect("reply text bounds");
+        assert!(
+            reply_bounds.height <= 22.0,
+            "reply quote stays single-line within HEADER_LINE: {}",
+            reply_bounds.height
+        );
+        let (width, height, rgba) = drawn(&mut ui);
+        let scale = 2.0;
+        let rx0 = (reply_bounds.x * scale) as usize;
+        let ry0 = (reply_bounds.y * scale) as usize;
+        let rx1 = ((reply_bounds.x + reply_bounds.width) * scale).ceil() as usize;
+        let ry1 = ((reply_bounds.y + reply_bounds.height) * scale).ceil() as usize;
+        let has_magenta = (ry0..ry1.min(height as usize)).any(|y| {
+            (rx0..rx1.min(width as usize)).any(|x| {
+                let at = (y * width as usize + x) * 4;
+                rgba[at] > 200 && rgba[at + 1] < 40 && rgba[at + 2] > 160
+            })
+        });
+        assert!(
+            has_magenta,
+            "static reply emoji renders its pixels in theme {}",
+            app.theme.id
+        );
+    }
+
+    // Replying to a message with custom emoji also renders in the composer reply bar.
+    let _ = app.update(Message::Control("theme bonfire".into()));
+    change(&mut app, |state| {
+        state.messages = Arc::new(vec![Arc::new(ChatMessage {
+            item: "original-with-emoji".into(),
+            author: "desu".into(),
+            body: "hey :AMkiss:".into(),
+            formatted: true,
+            emoji: vec![emoji[0].clone()],
+            can_reply: true,
+            ..Default::default()
+        })]);
+    });
+    interact(&mut app, |ui| right_click(ui, "hey \u{2003}"));
+    interact(&mut app, |ui| {
+        ui.click("Reply").expect("Reply");
+    });
+    assert!(
+        shows(&app, "Replying to desu: hey \u{2003}"),
+        "composer reply bar renders inline custom emoji placeholder"
+    );
 }
