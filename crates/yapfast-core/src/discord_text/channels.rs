@@ -5,10 +5,14 @@ use std::{collections::VecDeque, sync::Mutex};
 
 /// Decoded previews shared by all recent channels. Active rows hold their
 /// own handles; closing a channel leaves only this bounded cache owning pixels.
+/// Each is kept with when it was last asked for.
 #[derive(Default)]
 pub(super) struct PreviewCache {
-    pictures: VecDeque<(String, Arc<Picture>)>,
+    pictures: VecDeque<(String, Arc<Picture>, Instant)>,
     bytes: usize,
+    /// A task is waiting to let go of animated pictures nobody asks for
+    /// ([`watch_idle`]).
+    sweeping: bool,
 }
 
 pub(super) const PREVIEW_CACHE_BYTES: usize = 8 * 1024 * 1024;
@@ -16,15 +20,16 @@ pub(super) type SharedPreviews = Arc<Mutex<PreviewCache>>;
 
 impl PreviewCache {
     pub(super) fn get(&mut self, url: &str) -> Option<Arc<Picture>> {
-        let index = self.pictures.iter().position(|(key, _)| key == url)?;
-        let kept = self.pictures.remove(index).unwrap();
+        let index = self.pictures.iter().position(|(key, ..)| key == url)?;
+        let mut kept = self.pictures.remove(index).unwrap();
+        kept.2 = Instant::now();
         let picture = kept.1.clone();
         self.pictures.push_back(kept);
         Some(picture)
     }
 
     pub(super) fn insert(&mut self, url: String, picture: Arc<Picture>) {
-        if let Some(index) = self.pictures.iter().position(|(key, _)| key == &url) {
+        if let Some(index) = self.pictures.iter().position(|(key, ..)| key == &url) {
             self.bytes -= self.pictures.remove(index).unwrap().1.rgba.len();
         }
         let bytes = picture.rgba.len();
@@ -35,8 +40,94 @@ impl PreviewCache {
             self.bytes -= self.pictures.pop_front().unwrap().1.rgba.len();
         }
         self.bytes += bytes;
-        self.pictures.push_back((url, picture));
+        self.pictures.push_back((url, picture, Instant::now()));
     }
+
+    /// Lets go of the animated pictures nobody has asked for in `idle` as of
+    /// `now`, and says how long until the next is that idle, if any is left.
+    /// A still picture stays, as it is small and the cache's limit keeps it in
+    /// check.
+    fn let_go_idle(&mut self, idle: Duration, now: Instant) -> Option<Duration> {
+        let mut bytes = self.bytes;
+        let mut next: Option<Duration> = None;
+        self.pictures.retain(|(_, picture, asked)| {
+            if picture.animation.is_none() {
+                return true;
+            }
+            let age = now.saturating_duration_since(*asked);
+            if age >= idle {
+                bytes -= picture.rgba.len();
+                return false;
+            }
+            let left = idle - age;
+            next = Some(next.map_or(left, |soonest| soonest.min(left)));
+            true
+        });
+        self.bytes = bytes;
+        next
+    }
+}
+
+/// With the setting on ([`crate::chat::set_free_idle_gifs`]), lets go of each
+/// animated picture in `previews` that nobody has asked for in
+/// [`crate::chat::IDLE_GIF`]. Nothing runs while none is kept: a task starts
+/// here, waits until the first is due, lets go, and waits again only for those
+/// left. A call finding one already waiting does nothing.
+pub(super) fn watch_idle(previews: &SharedPreviews) {
+    watch_idle_after(previews, crate::chat::IDLE_GIF);
+}
+
+/// [`watch_idle`] for pictures idle for `idle`.
+fn watch_idle_after(previews: &SharedPreviews, idle: Duration) {
+    if !crate::chat::free_idle_gifs() {
+        return;
+    }
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    {
+        let mut cache = previews
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let animated = cache
+            .pictures
+            .iter()
+            .any(|(_, picture, _)| picture.animation.is_some());
+        if cache.sweeping || !animated {
+            return;
+        }
+        cache.sweeping = true;
+    }
+    // The task holds no cache of its own: one nobody holds any more ends it.
+    let weak = Arc::downgrade(previews);
+    runtime.spawn(async move {
+        let mut wait = idle;
+        loop {
+            tokio::time::sleep(wait).await;
+            let Some(previews) = weak.upgrade() else {
+                return;
+            };
+            let next = {
+                let mut cache = previews
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let next = if crate::chat::free_idle_gifs() {
+                    cache.let_go_idle(idle, Instant::now())
+                } else {
+                    None
+                };
+                if next.is_none() {
+                    cache.sweeping = false;
+                }
+                next
+            };
+            match next {
+                // A little past the due time, so it is due when it wakes.
+                Some(left) => wait = left + Duration::from_millis(50),
+                None => return,
+            }
+        }
+    });
 }
 
 /// The open channel and those open lately, kept so going back to one shows
@@ -222,5 +313,64 @@ mod tests {
         cache.insert("oversized".into(), picture(PREVIEW_CACHE_BYTES + 1));
         assert!(cache.get("oversized").is_none());
         assert_eq!(cache.bytes, PREVIEW_CACHE_BYTES / 2 + 64);
+    }
+
+    fn moving(bytes: usize) -> Arc<Picture> {
+        Arc::new(Picture {
+            rgba: crate::chat::Pixels::new(0, 0, vec![0; bytes]),
+            animation: Some(crate::chat::Animation::video(&[], None, vec![100])),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn an_animation_nobody_asks_for_goes_after_the_idle_time_and_a_still_stays() {
+        let idle = Duration::from_secs(30);
+        let mut cache = PreviewCache::default();
+        cache.insert("still".into(), picture(100));
+        cache.insert("moving".into(), moving(1000));
+        let start = Instant::now();
+        let left = cache
+            .let_go_idle(idle, start + Duration::from_secs(10))
+            .expect("an animation is waiting");
+        assert!(
+            left > Duration::from_secs(19) && left <= Duration::from_secs(20),
+            "it says when the animation is due: {left:?}"
+        );
+        assert_eq!(cache.bytes, 1100, "ten seconds in, nothing has gone");
+        // Asked for again, it is idle from then: not yet at 31 seconds after
+        // the first ask, by the clock the call is given.
+        assert!(cache.get("moving").is_some());
+        let left = cache.let_go_idle(idle, Instant::now() + Duration::from_secs(25));
+        assert!(left.is_some(), "asked for lately, it stays");
+        assert_eq!(cache.bytes, 1100);
+        let left = cache.let_go_idle(idle, Instant::now() + Duration::from_secs(31));
+        assert_eq!(left, None, "no animation is left to wait for");
+        assert_eq!(cache.bytes, 100, "the animation's pixels went with it");
+        assert!(cache.get("moving").is_none());
+        assert!(cache.get("still").is_some(), "a still picture stays");
+    }
+
+    #[tokio::test]
+    async fn the_watch_lets_go_of_an_idle_animation_only_while_the_setting_is_on() {
+        let idle = Duration::from_millis(100);
+        let previews = SharedPreviews::default();
+        previews
+            .lock()
+            .unwrap()
+            .insert("moving".into(), moving(1000));
+        crate::chat::set_free_idle_gifs(false);
+        watch_idle_after(&previews, idle);
+        assert!(!previews.lock().unwrap().sweeping, "off, nothing waits");
+        crate::chat::set_free_idle_gifs(true);
+        watch_idle_after(&previews, idle);
+        assert!(previews.lock().unwrap().sweeping, "on, a task waits");
+        // A second call finds it waiting and starts no other.
+        watch_idle_after(&previews, idle);
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        crate::chat::set_free_idle_gifs(false);
+        let cache = previews.lock().unwrap();
+        assert_eq!(cache.bytes, 0, "idle for its time, the animation went");
+        assert!(!cache.sweeping, "and with none left the task ended");
     }
 }

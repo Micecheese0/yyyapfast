@@ -39,6 +39,7 @@ pub enum Pref {
     DateFormat(usize),
     TextSize(usize),
     Animate(usize),
+    FreeIdleGifs(bool),
     LinkPreviews(bool),
     CollapseLong(bool),
     BoostGems(bool),
@@ -136,6 +137,11 @@ impl Settings {
                 let animate = ANIMATES[index.min(2)];
                 prefs.animate = animate;
                 cx.keep("animate", animate);
+            }
+            Pref::FreeIdleGifs(on) => {
+                prefs.free_idle_gifs = on;
+                prefs.apply_gif_release();
+                cx.keep("free_idle_gifs", on);
             }
             Pref::LinkPreviews(on) => {
                 prefs.link_previews = Some(on);

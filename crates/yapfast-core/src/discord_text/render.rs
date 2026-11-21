@@ -311,6 +311,7 @@ pub(super) async fn with_previews(
         attachment.preview_failed = picture.is_none();
         attachment.preview = picture;
     }
+    super::channels::watch_idle(previews);
 }
 
 /// A picture downloaded and decoded at the timeline's preview size.

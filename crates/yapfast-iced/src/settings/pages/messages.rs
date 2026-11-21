@@ -104,6 +104,12 @@ impl<'a> Page<'a> {
                     animate,
                     |index| pref(Pref::Animate(index)),
                 ),
+                self.flip(
+                    "Let go of GIFs that stay off screen",
+                    "A GIF Yapfast keeps ready for the channels you opened lately goes after 30 seconds nobody looks at it, and loads again from its file if it comes back.",
+                    prefs.free_idle_gifs,
+                    Pref::FreeIdleGifs,
+                ),
             ]),
             form::rule(theme),
             self.flip(

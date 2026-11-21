@@ -235,6 +235,7 @@ impl App {
         // times on the clock Messages chose; the games named by hand.
         layout.voice.apply();
         layout.prefs.apply_clock();
+        layout.prefs.apply_gif_release();
         yapfast_core::discord::set_custom_games(&layout.prefs.game_executables);
         client.share_typing = layout.prefs.share_typing.unwrap_or(true);
         // The window opens at its size in the desktop's pixels whatever the

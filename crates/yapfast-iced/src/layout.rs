@@ -171,7 +171,8 @@ pub struct Prefs {
     /// `clock::DateFormat::ALL`, following the clock unless chosen), the
     /// text's size (0 small, 1 default, 2 large), link previews, boost gems,
     /// mentioning those replied to, tracking taken out of links sent,
-    /// sharing that this account types, and when animations play.
+    /// sharing that this account types, when animations play, and whether a
+    /// GIF off screen for 30 seconds is let go of (off unless turned on).
     pub twelve_hour_clock: bool,
     pub clock_seconds: bool,
     pub date_format: Option<i32>,
@@ -182,6 +183,7 @@ pub struct Prefs {
     pub strip_tracking: Option<bool>,
     pub share_typing: Option<bool>,
     pub animate: Animate,
+    pub free_idle_gifs: bool,
     /// Appearance's profile switches, and nameplates.
     pub nameplates: Option<bool>,
     pub profile_effects: Option<bool>,
@@ -238,6 +240,12 @@ impl Prefs {
             server_tags: self.server_tags.unwrap_or(default.server_tags),
             frames: self.profile_frames.unwrap_or(default.frames),
         }
+    }
+
+    /// Tells the core whether a GIF off screen for 30 seconds goes from the
+    /// previews it keeps.
+    pub fn apply_gif_release(&self) {
+        yapfast_core::chat::set_free_idle_gifs(self.free_idle_gifs);
     }
 
     /// Hands the date's order and the clock to what formats times.

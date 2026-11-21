@@ -68,7 +68,9 @@ recording. Each change is kept at once in
 - Messages: a message as the clock and text size show it; the text size
   (which the timeline's text takes), the clock and its seconds, the date's
   order (message times are worked out again for each), when GIFs and emoji
-  play, link previews (hidden ones leave "A card, hidden while link
+  play, "Let go of GIFs that stay off screen" (off unless turned on;
+  `free_idle_gifs`, handed to the core with `chat::set_free_idle_gifs`, see
+  [Discord](../discord/messages.md)), link previews (hidden ones leave "A card, hidden while link
   previews are off." where a card was the whole message), long messages
   folding, boost gems in the member list, sharing that this account types
   (off, the core's typing commands go nowhere), mentioning those replied

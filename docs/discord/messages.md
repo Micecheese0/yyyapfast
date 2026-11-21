@@ -67,6 +67,17 @@ can be decoded again from the disk cache. The UI drops decoded preview
 handles when closing a channel, so remembered UI timelines do not pin pixels
 outside the shared cache.
 
+Messages' "Let go of GIFs that stay off screen" (off by default) also lets go
+of an animated picture from that cache once nobody has asked for it in 30
+seconds (`chat::IDLE_GIF`), where the size limit alone would keep it until
+others push it out. Still pictures stay. Each entry is kept with when it was
+last asked for, and nothing runs while none is animated: storing or looking at
+a preview starts one task (`channels::watch_idle`) that waits until the first
+is due, lets go, and waits again only for those left. It frees memory only
+when nothing else holds the picture: a row near the view holds its own handle,
+and the window's copy goes at its next pruning. A GIF let go of is read from
+its file again when it comes back in sight.
+
 The open channel renders each message for the timeline once, with its
 author's name, colour and avatar and its mentions as names, and keeps it. A
 new message, an edit, a reaction or a preview that arrived renders only that

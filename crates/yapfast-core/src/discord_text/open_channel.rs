@@ -1219,6 +1219,7 @@ impl OpenChannel {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .insert(url.clone(), picture.clone());
+            super::channels::watch_idle(&self.previews);
         }
         for (order, message) in &self.shown.messages {
             if message.attachments.iter().any(|attachment| {
@@ -1263,6 +1264,8 @@ impl OpenChannel {
                 })
             })
         });
+        // Pictures kept before the setting went on start their wait here.
+        super::channels::watch_idle(&self.previews);
         true
     }
 

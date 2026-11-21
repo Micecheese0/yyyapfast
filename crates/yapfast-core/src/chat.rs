@@ -1531,6 +1531,24 @@ pub fn set_pixel_buffers(make: MakePixels) {
     let _ = MAKE_PIXELS.set(make);
 }
 
+static FREE_IDLE_GIFS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// How long the shared previews keep an animated picture nobody has asked for,
+/// once [`set_free_idle_gifs`] is on.
+pub const IDLE_GIF: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether an animated picture that nobody has asked for in [`IDLE_GIF`] goes
+/// from the previews the recent channels share, and is read from its file again
+/// when one asks. Off, they stay until the cache's size limit pushes them out.
+pub fn set_free_idle_gifs(on: bool) {
+    FREE_IDLE_GIFS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// What [`set_free_idle_gifs`] set; off until then.
+pub fn free_idle_gifs() -> bool {
+    FREE_IDLE_GIFS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Pixels {
     pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Self {
         match MAKE_PIXELS.get() {
